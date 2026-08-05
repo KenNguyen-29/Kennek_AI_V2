@@ -13,6 +13,22 @@ const authOptions: NextAuthOptions = {
       clientSecret: process.env.GITHUB_SECRET ?? "",
     }),
   ],
+  callbacks: {
+    async jwt({ token, account, profile }) {
+      if (account?.providerAccountId) {
+        token.userId = `${account.provider}:${account.providerAccountId}`;
+      } else if (!token.userId && profile && "email" in profile && profile.email) {
+        token.userId = String(profile.email);
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (session.user) {
+        session.user.id = String(token.userId ?? token.sub ?? "");
+      }
+      return session;
+    },
+  },
   pages: {
     signIn: "/auth/signin",
   },

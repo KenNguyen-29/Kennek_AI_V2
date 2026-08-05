@@ -10,9 +10,11 @@ import {
   Sparkles,
   User,
 } from "lucide-react";
+import { useSession } from "next-auth/react";
 import {
   type FormEvent,
   type KeyboardEvent,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -20,7 +22,8 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-const CHAT_ENDPOINT = "http://localhost:8000/api/chat/stream";
+const API_BASE = "http://localhost:8000";
+const CHAT_ENDPOINT = `${API_BASE}/api/chat/stream`;
 
 type ChatRole = "user" | "assistant";
 
@@ -28,6 +31,13 @@ type ChatMessage = {
   id: string;
   role: ChatRole;
   content: string;
+};
+
+type ChatSessionSummary = {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
 };
 
 type ServerEvent = {
@@ -110,12 +120,23 @@ function MarkdownMessage({ content }: { content: string }) {
 }
 
 export function Chat() {
+  const { data: session } = useSession();
+  const userEmail = session?.user?.email ?? null;
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({
@@ -130,6 +151,32 @@ export function Chat() {
     [],
   );
 
+  const fetchHistory = useCallback(async (externalUserId: string) => {
+    setIsLoadingHistory(true);
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/chat/history/${encodeURIComponent(externalUserId)}`,
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to load history (${response.status})`);
+      }
+      const data = (await response.json()) as ChatSessionSummary[];
+      setSessions(data);
+    } catch (error) {
+      console.error("Unable to load chat history", error);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!userEmail) {
+      setSessions([]);
+      return;
+    }
+    void fetchHistory(userEmail);
+  }, [fetchHistory, userEmail]);
+
   const appendAssistantToken = (assistantId: string, token: string) => {
     setMessages((currentMessages) =>
       currentMessages.map((message) =>
@@ -138,6 +185,87 @@ export function Chat() {
           : message,
       ),
     );
+  };
+
+  const persistTurn = async (
+    userMessage: ChatMessage,
+    assistantContent: string,
+  ) => {
+    if (!userEmail || !assistantContent.trim()) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/chat/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_email: userEmail,
+          name: session?.user?.name ?? null,
+          avatar_url: session?.user?.image ?? null,
+          session_id: activeSessionIdRef.current,
+          title: userMessage.content.slice(0, 80),
+          messages: [
+            { role: "user", content: userMessage.content },
+            { role: "assistant", content: assistantContent },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to persist chat (${response.status})`);
+      }
+
+      const data = (await response.json()) as {
+        session_id: string;
+        title: string;
+      };
+      setActiveSessionId(data.session_id);
+      activeSessionIdRef.current = data.session_id;
+      await fetchHistory(userEmail);
+    } catch (error) {
+      console.error("Unable to persist chat history", error);
+    }
+  };
+
+  const loadSession = async (sessionId: string) => {
+    if (!userEmail || isStreaming) {
+      return;
+    }
+
+    abortControllerRef.current?.abort();
+    setStatus(null);
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/chat/sessions/${sessionId}?user_email=${encodeURIComponent(userEmail)}`,
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to load session (${response.status})`);
+      }
+
+      const data = (await response.json()) as {
+        id: string;
+        title: string;
+        messages: Array<{ id: string; role: string; content: string }>;
+      };
+
+      setActiveSessionId(data.id);
+      setMessages(
+        data.messages
+          .filter(
+            (message): message is { id: string; role: ChatRole; content: string } =>
+              message.role === "user" || message.role === "assistant",
+          )
+          .map((message) => ({
+            id: message.id,
+            role: message.role,
+            content: message.content,
+          })),
+      );
+    } catch (error) {
+      console.error("Unable to load chat session", error);
+    }
   };
 
   const submitMessage = async (event?: FormEvent) => {
@@ -152,6 +280,7 @@ export function Chat() {
     const userMessage = createMessage("user", query);
     const assistantMessage = createMessage("assistant", "");
     const controller = new AbortController();
+    let assistantContent = "";
 
     abortControllerRef.current = controller;
     setInput("");
@@ -194,22 +323,26 @@ export function Chat() {
 
           if (streamEvent.type === "token") {
             setStatus(null);
+            assistantContent += streamEvent.content;
             appendAssistantToken(assistantMessage.id, streamEvent.content);
             return;
           }
 
           if (streamEvent.type === "error") {
             setStatus(null);
-            appendAssistantToken(
-              assistantMessage.id,
-              `\n\n**Lỗi:** ${streamEvent.content}`,
-            );
+            const errorText = `\n\n**Lỗi:** ${streamEvent.content}`;
+            assistantContent += errorText;
+            appendAssistantToken(assistantMessage.id, errorText);
           }
         },
         onerror(error) {
           throw error;
         },
       });
+
+      if (!controller.signal.aborted) {
+        await persistTurn(userMessage, assistantContent);
+      }
     } catch (error) {
       if (!controller.signal.aborted) {
         console.error("Unable to stream chat response", error);
@@ -238,14 +371,12 @@ export function Chat() {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     setMessages([]);
+    setActiveSessionId(null);
+    activeSessionIdRef.current = null;
     setInput("");
     setStatus(null);
     setIsStreaming(false);
   };
-
-  const conversationTitle =
-    messages.find((message) => message.role === "user")?.content ??
-    "Cuộc trò chuyện mới";
 
   return (
     <div className="flex h-dvh overflow-hidden bg-slate-900 text-slate-100">
@@ -275,14 +406,34 @@ export function Chat() {
           <p className="mb-2 px-2 text-xs font-medium uppercase tracking-wider text-slate-500">
             Lịch sử chat
           </p>
-          {messages.length > 0 ? (
-            <button
-              type="button"
-              className="flex w-full items-center gap-3 rounded-xl bg-white/10 px-3 py-3 text-left text-sm text-slate-200"
-            >
-              <MessageSquare className="h-4 w-4 shrink-0 text-slate-400" />
-              <span className="truncate">{conversationTitle}</span>
-            </button>
+
+          {!userEmail ? (
+            <p className="px-3 py-4 text-sm text-slate-600">
+              Đăng nhập để lưu và xem lịch sử hội thoại.
+            </p>
+          ) : isLoadingHistory ? (
+            <div className="flex items-center gap-2 px-3 py-4 text-sm text-slate-500">
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+              Đang tải...
+            </div>
+          ) : sessions.length > 0 ? (
+            <div className="space-y-1">
+              {sessions.map((chatSession) => (
+                <button
+                  key={chatSession.id}
+                  type="button"
+                  onClick={() => void loadSession(chatSession.id)}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition ${
+                    activeSessionId === chatSession.id
+                      ? "bg-white/10 text-slate-100"
+                      : "text-slate-300 hover:bg-white/5"
+                  }`}
+                >
+                  <MessageSquare className="h-4 w-4 shrink-0 text-slate-400" />
+                  <span className="truncate">{chatSession.title}</span>
+                </button>
+              ))}
+            </div>
           ) : (
             <p className="px-3 py-4 text-sm text-slate-600">
               Chưa có cuộc trò chuyện
