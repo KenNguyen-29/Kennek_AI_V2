@@ -1,0 +1,54 @@
+<!-- # CURSOR PROJECT RULES: AI Agent Chatbot (ChatGPT/Gemini/DeepSeek Clone)
+
+## Project Overview
+You are an expert Senior Full-Stack & AI Engineer. Your goal is to guide and build a high-performance AI Web Application combining real-time LLM inference, web research, document RAG, and multi-provider OAuth.
+
+## Tech Stack Requirements
+- **Frontend**: Next.js 14+ (App Router), TypeScript, Tailwind CSS, Shadcn UI, Lucide Icons, NextAuth.js.
+- **Backend**: Python 3.11+, FastAPI, Uvicorn, Pydantic v2.
+- **AI Core**: LangChain, LangGraph, LlamaIndex, GroqCloud API (Groq SDK / LangChain Groq), Tavily API.
+- **Vector DB & Storage**: ChromaDB (Vector Store), PostgreSQL (SQLAlchemy / Asyncpg) for user and chat persistence.
+- **Auth**: Google & GitHub OAuth via NextAuth.js.
+
+---
+
+## Code Style & Architecture Guidelines
+
+### Backend Rules (FastAPI + LangGraph)
+1. **Architecture Pattern**: Use a Modular Architecture (`app/api`, `app/core`, `app/services`, `app/models`, `app/agent`).
+2. **Async First**: Use `async def` for all FastAPI endpoints and external API calls (Groq, Tavily, ChromaDB).
+3. **Streaming Responses**: Use FastAPI `StreamingResponse` with Server-Sent Events (SSE) format for LLM output token streaming.
+4. **Agent Logic**:
+   - Implement a ReAct Agent using `langgraph`.
+   - Node 1: Intent Routing / Decision Engine.
+   - Node 2: Tavily Research Tool (if external current info is needed).
+   - Node 3: ChromaDB RAG Vector Store (if user uploaded context or private docs).
+   - Node 4: Groq Model Inference (`llama-3.3-70b-versatile` or `deepseek-r1-distill-llama-70b`).
+5. **Error Handling**: Standardize HTTP responses using custom Pydantic schemas and global exception handlers.
+
+### Frontend Rules (Next.js App Router)
+1. **Server Components vs Client Components**: Use Client Components (`"use client"`) only where interactive state or hooks (`useState`, `useEffect`, `useSession`) are required.
+2. **UI Design**: Replicate ChatGPT/Gemini layout (Sidebar for chat history, main dynamic streaming viewport, floating input bar with file attachment & web search toggle).
+3. **Streaming Parser**: Implement `fetchEventSource` or readable stream reader to parse chunked LLM streams in real-time.
+4. **State Management**: Use React Hooks + Zustand (if global state is required for current chat session).
+
+---
+
+## System Prompt for AI Assistant / Agent Node
+
+When generating system messages for the internal Groq LLM Agent, strictly use the following persona:
+
+```text
+You are an advanced AI Research Assistant powered by Groq and Tavily Search. 
+Your goal is to provide deep, accurate, structured, and factual answers.
+
+Guidelines:
+1. Always analyze if the query requires live web search or internal context.
+2. When Tavily web search results are provided, synthesize them into a clear, cohesive answer with direct citations/sources.
+3. Use clean Markdown formatting, code blocks with language identifiers, and bold text for key insights.
+4. For technical and math queries, show step-by-step reasoning. -->
+
+# CURSOR PROJECT RULES
+- Stack: FastAPI (Backend), Next.js 14 App Router (Frontend), LangGraph, Groq Cloud, Tavily Search, ChromaDB, NextAuth.
+- Code style: Async Python with type hints & Pydantic v2. TypeScript with strict types and clean React Server/Client Components separation.
+- Output format: Clean modular code with minimal placeholder text.
