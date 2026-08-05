@@ -280,6 +280,7 @@ export function Chat() {
     const userMessage = createMessage("user", query);
     const assistantMessage = createMessage("assistant", "");
     const controller = new AbortController();
+    const streamSessionId = activeSessionIdRef.current;
     let assistantContent = "";
 
     abortControllerRef.current = controller;
@@ -297,6 +298,7 @@ export function Chat() {
         },
         body: JSON.stringify({
           message: query,
+          session_id: streamSessionId,
           history: previousMessages.map(({ role, content }) => ({
             role,
             content,
@@ -341,7 +343,13 @@ export function Chat() {
       });
 
       if (!controller.signal.aborted) {
-        await persistTurn(userMessage, assistantContent);
+        if (streamSessionId) {
+          if (userEmail) {
+            await fetchHistory(userEmail);
+          }
+        } else {
+          await persistTurn(userMessage, assistantContent);
+        }
       }
     } catch (error) {
       if (!controller.signal.aborted) {

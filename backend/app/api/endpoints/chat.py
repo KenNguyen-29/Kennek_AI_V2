@@ -1,13 +1,20 @@
+import json
+import logging
 import uuid
+from collections.abc import AsyncIterator
 from datetime import datetime
+from datetime import timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
+from app.models.chat import ChatMessage, ChatSession
 from app.services.agent_service import stream_agent_response
 from app.services.chat_history_service import (
     get_session_messages,
@@ -16,6 +23,7 @@ from app.services.chat_history_service import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class StreamChatMessage(BaseModel):
@@ -25,6 +33,7 @@ class StreamChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
+    session_id: uuid.UUID | None = None
     history: list[StreamChatMessage] = Field(default_factory=list)
 
 
@@ -67,11 +76,96 @@ class ChatSessionDetailResponse(BaseModel):
     messages: list[ChatMessageResponse]
 
 
+def _format_sse(payload: dict[str, str]) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+async def _stream_and_persist(
+    *,
+    query: str,
+    history: list[dict[str, str]],
+    session_id: uuid.UUID | None,
+) -> AsyncIterator[str]:
+    assistant_parts: list[str] = []
+    stream_failed = False
+
+    async for chunk in stream_agent_response(query, history):
+        try:
+            payload = json.loads(chunk.removeprefix("data: ").strip())
+            if payload.get("type") == "token":
+                assistant_parts.append(payload.get("content", ""))
+            elif payload.get("type") == "error":
+                stream_failed = True
+        except (json.JSONDecodeError, AttributeError):
+            logger.warning("Received an invalid SSE payload from the agent")
+
+        yield chunk
+
+    assistant_content = "".join(assistant_parts).strip()
+    if session_id is None or stream_failed or not assistant_content:
+        return
+
+    try:
+        async with SessionLocal() as db:
+            chat_session = await db.get(ChatSession, session_id)
+            if chat_session is None:
+                raise LookupError(f"Chat session {session_id} no longer exists")
+
+            db.add_all(
+                [
+                    ChatMessage(
+                        session_id=session_id,
+                        role="user",
+                        content=query,
+                    ),
+                    ChatMessage(
+                        session_id=session_id,
+                        role="assistant",
+                        content=assistant_content,
+                    ),
+                ],
+            )
+            chat_session.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+    except Exception:
+        logger.exception("Failed to persist streamed chat messages")
+        yield _format_sse(
+            {
+                "type": "error",
+                "content": "Response generated but could not be saved.",
+            },
+        )
+
+
 @router.post("/api/chat/stream", response_class=StreamingResponse)
 async def stream_chat(request: ChatRequest) -> StreamingResponse:
     history = [message.model_dump() for message in request.history]
+
+    if request.session_id is not None:
+        async with SessionLocal() as db:
+            result = await db.execute(
+                select(ChatSession)
+                .options(selectinload(ChatSession.messages))
+                .where(ChatSession.id == request.session_id),
+            )
+            chat_session = result.scalar_one_or_none()
+        if chat_session is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Chat session not found",
+            )
+
+        history = [
+            {"role": message.role, "content": message.content}
+            for message in chat_session.messages
+        ]
+
     return StreamingResponse(
-        stream_agent_response(request.message, history),
+        _stream_and_persist(
+            query=request.message,
+            history=history,
+            session_id=request.session_id,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
