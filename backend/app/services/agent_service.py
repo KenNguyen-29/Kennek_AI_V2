@@ -10,6 +10,7 @@ from langchain_core.tools import tool
 from langchain_groq import ChatGroq
 from langgraph.prebuilt import create_react_agent
 
+from app.agent.system_prompt import DOCUMENT_PROCESSOR_SYSTEM_PROMPT
 from app.core.config import get_settings
 from app.services.vector_service import query_vector_store
 
@@ -23,7 +24,11 @@ def _format_sse(payload: dict[str, str]) -> str:
 
 @tool
 def retrieve_knowledge_base(query: str) -> str:
-    """Retrieve relevant context from the user's local knowledge base."""
+    """Retrieve relevant context from uploaded documents in the knowledge base.
+
+    Use this tool whenever the user asks about files they uploaded, PDFs,
+    spreadsheets, code files, or private documents stored in the knowledge base.
+    """
     contexts = query_vector_store(query)
     if not contexts:
         return "No relevant context was found in the knowledge base."
@@ -50,6 +55,7 @@ def _get_agent() -> Any:
     return create_react_agent(
         model=model,
         tools=[search_tool, retrieve_knowledge_base],
+        prompt=DOCUMENT_PROCESSOR_SYSTEM_PROMPT,
     )
 
 

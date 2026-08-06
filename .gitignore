@@ -12,4 +12,5 @@ frontend/.env*.local
 backend/__pycache__/
 backend/*.pyc
 backend/chroma_db/
+backend/uploads/
 backend/.env

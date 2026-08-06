@@ -11,3 +11,10 @@ tavily-python
 chromadb
 llama-index
 python-dotenv
+python-multipart
+pandas
+openpyxl
+xlrd
+tabulate
+pypdf
+python-docx

@@ -7,14 +7,17 @@ import {
   LogIn,
   LogOut,
   MessageSquare,
+  Paperclip,
   Plus,
   SendHorizontal,
   Sparkles,
   User,
+  X,
 } from "lucide-react";
 import { signIn, signOut, useSession } from "next-auth/react";
 import Link from "next/link";
 import {
+  type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
   useCallback,
@@ -28,6 +31,26 @@ import remarkGfm from "remark-gfm";
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 const CHAT_ENDPOINT = `${API_BASE}/api/chat/stream`;
+const UPLOAD_ENDPOINT = `${API_BASE}/api/documents/upload`;
+
+const ACCEPTED_FILE_TYPES = [
+  ".txt",
+  ".md",
+  ".log",
+  ".pdf",
+  ".docx",
+  ".doc",
+  ".csv",
+  ".xlsx",
+  ".xls",
+  ".json",
+  ".xml",
+  ".yaml",
+  ".yml",
+  ".py",
+  ".js",
+  ".html",
+].join(",");
 
 type ChatRole = "user" | "assistant";
 
@@ -134,9 +157,12 @@ export function Chat() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
@@ -274,12 +300,103 @@ export function Chat() {
     }
   };
 
+  const uploadPendingFiles = async (): Promise<string | null> => {
+    if (pendingFiles.length === 0) {
+      return null;
+    }
+
+    setIsUploading(true);
+    setStatus("Đang nạp tài liệu vào kho tri thức...");
+
+    try {
+      const formData = new FormData();
+      pendingFiles.forEach((file) => formData.append("files", file));
+
+      const response = await fetch(UPLOAD_ENDPOINT, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => null)) as {
+          detail?: string;
+        } | null;
+        throw new Error(
+          errorBody?.detail ?? `Upload failed (${response.status})`,
+        );
+      }
+
+      const data = (await response.json()) as {
+        files: string[];
+        chunk_count: number;
+        message: string;
+      };
+
+      const summary =
+        `Đã tiếp nhận ${data.files.length} file: ${data.files.join(", ")}. ` +
+        `Nạp ${data.chunk_count} đoạn vào kho tri thức. ` +
+        "Bạn có thể hỏi về nội dung các file này.";
+
+      setMessages((current) => [
+        ...current,
+        createMessage("assistant", summary),
+      ]);
+      setPendingFiles([]);
+      return summary;
+    } catch (error) {
+      console.error("Unable to upload documents", error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Không thể upload tài liệu.";
+      setMessages((current) => [
+        ...current,
+        createMessage("assistant", `**Lỗi upload:** ${message}`),
+      ]);
+      return null;
+    } finally {
+      setIsUploading(false);
+      setStatus(null);
+    }
+  };
+
+  const handleFileSelection = (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files ?? []);
+    if (selected.length === 0) {
+      return;
+    }
+    setPendingFiles((current) => {
+      const existing = new Set(
+        current.map((file) => `${file.name}-${file.size}-${file.lastModified}`),
+      );
+      const next = selected.filter(
+        (file) => !existing.has(`${file.name}-${file.size}-${file.lastModified}`),
+      );
+      return [...current, ...next];
+    });
+    event.target.value = "";
+  };
+
+  const removePendingFile = (index: number) => {
+    setPendingFiles((current) => current.filter((_, i) => i !== index));
+  };
+
   const submitMessage = async (event?: FormEvent) => {
     event?.preventDefault();
 
     const query = input.trim();
-    if (!query || isStreaming) {
+    if ((!query && pendingFiles.length === 0) || isStreaming || isUploading) {
       return;
+    }
+
+    if (pendingFiles.length > 0) {
+      const uploadSummary = await uploadPendingFiles();
+      if (!query) {
+        return;
+      }
+      if (!uploadSummary) {
+        return;
+      }
     }
 
     const previousMessages = messages;
@@ -293,7 +410,7 @@ export function Chat() {
     setInput("");
     setStatus(null);
     setIsStreaming(true);
-    setMessages([...previousMessages, userMessage, assistantMessage]);
+    setMessages((current) => [...current, userMessage, assistantMessage]);
 
     try {
       await fetchEventSource(CHAT_ENDPOINT, {
@@ -390,8 +507,10 @@ export function Chat() {
     setActiveSessionId(null);
     activeSessionIdRef.current = null;
     setInput("");
+    setPendingFiles([]);
     setStatus(null);
     setIsStreaming(false);
+    setIsUploading(false);
   };
 
   return (
@@ -600,26 +719,68 @@ export function Chat() {
         </div>
 
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-900 via-slate-900 to-transparent px-4 pb-5 pt-10 sm:px-6">
+          {pendingFiles.length > 0 && (
+            <div className="mx-auto mb-3 flex max-w-4xl flex-wrap gap-2">
+              {pendingFiles.map((file, index) => (
+                <div
+                  key={`${file.name}-${file.lastModified}-${index}`}
+                  className="flex items-center gap-2 rounded-full border border-white/10 bg-slate-800 px-3 py-1.5 text-xs text-slate-200"
+                >
+                  <span className="max-w-[180px] truncate">{file.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => removePendingFile(index)}
+                    aria-label={`Xóa ${file.name}`}
+                    className="rounded-full p-0.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <form
             onSubmit={submitMessage}
-            className="mx-auto flex max-w-4xl items-end gap-3 rounded-2xl border border-white/10 bg-slate-800 p-2 shadow-2xl shadow-black/30 focus-within:border-cyan-400/40"
+            className="mx-auto flex max-w-4xl items-end gap-2 rounded-2xl border border-white/10 bg-slate-800 p-2 shadow-2xl shadow-black/30 focus-within:border-cyan-400/40"
           >
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={ACCEPTED_FILE_TYPES}
+              className="hidden"
+              onChange={handleFileSelection}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isStreaming || isUploading}
+              aria-label="Đính kèm tài liệu"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 text-slate-300 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Paperclip className="h-5 w-5" />
+            </button>
             <textarea
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
               rows={1}
-              placeholder="Nhập tin nhắn..."
-              disabled={isStreaming}
+              placeholder="Nhập tin nhắn hoặc đính kèm file..."
+              disabled={isStreaming || isUploading}
               className="max-h-36 min-h-11 flex-1 resize-none bg-transparent px-3 py-3 text-sm leading-5 text-white outline-none placeholder:text-slate-500 disabled:cursor-not-allowed"
             />
             <button
               type="submit"
-              disabled={!input.trim() || isStreaming}
+              disabled={
+                (!input.trim() && pendingFiles.length === 0) ||
+                isStreaming ||
+                isUploading
+              }
               aria-label="Gửi tin nhắn"
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-cyan-500 text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-500"
             >
-              {isStreaming ? (
+              {isStreaming || isUploading ? (
                 <LoaderCircle className="h-5 w-5 animate-spin" />
               ) : (
                 <SendHorizontal className="h-5 w-5" />
@@ -627,7 +788,7 @@ export function Chat() {
             </button>
           </form>
           <p className="mx-auto mt-2 max-w-4xl text-center text-[11px] text-slate-600">
-            Enter để gửi · Shift + Enter để xuống dòng
+            Enter để gửi · Đính kèm PDF, DOCX, Excel, CSV, TXT, code...
           </p>
         </div>
       </main>
