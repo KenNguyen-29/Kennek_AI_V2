@@ -11,9 +11,14 @@ class Settings(BaseSettings):
     database_url: str = Field(validation_alias="DATABASE_URL")
     groq_api_key: str = Field(validation_alias="GROQ_API_KEY")
     tavily_api_key: str = Field(validation_alias="TAVILY_API_KEY")
+    # Default / fallback chat model (text path). Router may override per request.
     model_name: str = Field(
         default="llama-3.3-70b-versatile",
         validation_alias="MODEL_NAME",
+    )
+    enable_content_moderation: bool = Field(
+        default=False,
+        validation_alias="ENABLE_CONTENT_MODERATION",
     )
 
     model_config = SettingsConfigDict(

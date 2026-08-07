@@ -4,6 +4,7 @@ sqlalchemy
 asyncpg
 alembic
 pydantic-settings
+groq
 langchain-groq
 langchain-community
 langgraph

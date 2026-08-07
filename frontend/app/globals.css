@@ -3,17 +3,148 @@
 @tailwind utilities;
 
 :root {
-  --background: #0f172a;
-  --foreground: #f1f5f9;
+  /* Shared brand accent from logo K */
+  --kennek-orange: #ff6a00;
+  --kennek-orange-dim: rgba(255, 106, 0, 0.45);
+  --kennek-orange-glow: rgba(255, 106, 0, 0.18);
+  --kennek-grid-line: rgba(255, 106, 0, 0.04);
+  --kennek-overlay: rgba(5, 6, 7, 0.72);
+
+  /* Dark (default) — industrial charcoal */
+  --kennek-black: #050607;
+  --kennek-charcoal: #0e1013;
+  --kennek-panel: #16191e;
+  --kennek-steel: #2a2f36;
+  --kennek-mist: #9aa3ad;
+  --kennek-ash: #6b737c;
+  --kennek-ink: #f3f5f7;
+
+  --background: var(--kennek-charcoal);
+  --foreground: var(--kennek-ink);
+  color-scheme: dark;
+}
+
+html.light {
+  --kennek-orange-dim: rgba(255, 106, 0, 0.35);
+  --kennek-orange-glow: rgba(255, 106, 0, 0.14);
+  --kennek-grid-line: rgba(255, 106, 0, 0.08);
+  --kennek-overlay: rgba(18, 21, 26, 0.45);
+
+  --kennek-black: #f3f4f6;
+  --kennek-charcoal: #e8eaee;
+  --kennek-panel: #ffffff;
+  --kennek-steel: #cfd5dc;
+  --kennek-mist: #5a636e;
+  --kennek-ash: #7a8490;
+  --kennek-ink: #12151a;
+
+  --background: var(--kennek-charcoal);
+  --foreground: var(--kennek-ink);
+  color-scheme: light;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-be-vietnam), "Segoe UI", "Roboto", Arial, sans-serif;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+/* Prevent Vietnamese diacritic clipping (ắ, ầ, ể, …) */
+h1,
+h2,
+h3,
+h4,
+.vi-safe {
+  line-height: 1.5;
+  overflow: visible;
+  padding-block: 0.15em;
+  text-rendering: optimizeLegibility;
 }
 
 * {
-  scrollbar-color: #475569 transparent;
+  scrollbar-color: var(--kennek-steel) transparent;
   scrollbar-width: thin;
+}
+
+@layer utilities {
+  /* Chamfer 45°: top-left + bottom-right (logo K geometry) */
+  .clip-chamfer-sm {
+    clip-path: polygon(
+      8px 0,
+      100% 0,
+      100% calc(100% - 8px),
+      calc(100% - 8px) 100%,
+      0 100%,
+      0 8px
+    );
+  }
+
+  .clip-chamfer {
+    clip-path: polygon(
+      12px 0,
+      100% 0,
+      100% calc(100% - 12px),
+      calc(100% - 12px) 100%,
+      0 100%,
+      0 12px
+    );
+  }
+
+  .clip-chamfer-lg {
+    clip-path: polygon(
+      18px 0,
+      100% 0,
+      100% calc(100% - 18px),
+      calc(100% - 18px) 100%,
+      0 100%,
+      0 18px
+    );
+  }
+
+  .clip-chamfer-avatar {
+    clip-path: polygon(
+      6px 0,
+      100% 0,
+      100% calc(100% - 6px),
+      calc(100% - 6px) 100%,
+      0 100%,
+      0 6px
+    );
+  }
+
+  .kennek-grid {
+    background-image:
+      linear-gradient(var(--kennek-grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--kennek-grid-line) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+
+  .kennek-rail {
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      var(--kennek-orange) 12%,
+      var(--kennek-orange) 88%,
+      transparent 100%
+    );
+  }
+}
+
+@layer components {
+  .kennek-frame {
+    @apply clip-chamfer bg-kennek-orange p-px transition;
+  }
+
+  .kennek-frame-inner {
+    @apply clip-chamfer bg-kennek-panel;
+  }
+
+  .kennek-frame-active {
+    @apply shadow-kennek-glow;
+  }
+
+  .kennek-label {
+    @apply font-mono text-[10px] uppercase tracking-[0.22em] text-kennek-orange;
+  }
 }

@@ -113,3 +113,26 @@ async def get_session_messages(
         ),
     )
     return result.scalar_one_or_none()
+
+
+async def delete_session_for_user(
+    db: AsyncSession,
+    *,
+    user_email: str,
+    session_id: uuid.UUID,
+) -> bool:
+    result = await db.execute(
+        select(ChatSession)
+        .join(User)
+        .where(
+            ChatSession.id == session_id,
+            User.email == user_email,
+        ),
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        return False
+
+    await db.delete(session)
+    await db.commit()
+    return True

@@ -17,10 +17,12 @@ from app.core.database import SessionLocal, get_db
 from app.models.chat import ChatMessage, ChatSession
 from app.services.agent_service import stream_agent_response
 from app.services.chat_history_service import (
+    delete_session_for_user,
     get_session_messages,
     list_sessions_for_user,
     save_chat_turn,
 )
+from app.services.model_router import AttachmentInput
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -31,10 +33,21 @@ class StreamChatMessage(BaseModel):
     content: str
 
 
+class ChatAttachment(BaseModel):
+    """Optional multimodal attachment used by the Groq model router."""
+
+    filename: str | None = None
+    mime_type: str | None = None
+    content_base64: str | None = None
+    url: str | None = None
+    kind: Literal["image", "audio", "text", "unknown"] | None = None
+
+
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=1)
+    message: str = Field(default="", min_length=0)
     session_id: uuid.UUID | None = None
     history: list[StreamChatMessage] = Field(default_factory=list)
+    attachments: list[ChatAttachment] = Field(default_factory=list)
 
 
 class PersistMessage(BaseModel):
@@ -85,11 +98,12 @@ async def _stream_and_persist(
     query: str,
     history: list[dict[str, str]],
     session_id: uuid.UUID | None,
+    attachments: list[AttachmentInput] | None = None,
 ) -> AsyncIterator[str]:
     assistant_parts: list[str] = []
     stream_failed = False
 
-    async for chunk in stream_agent_response(query, history):
+    async for chunk in stream_agent_response(query, history, attachments):
         try:
             payload = json.loads(chunk.removeprefix("data: ").strip())
             if payload.get("type") == "token":
@@ -139,7 +153,23 @@ async def _stream_and_persist(
 
 @router.post("/api/chat/stream", response_class=StreamingResponse)
 async def stream_chat(request: ChatRequest) -> StreamingResponse:
+    if not request.message.strip() and not request.attachments:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="message or attachments is required",
+        )
+
     history = [message.model_dump() for message in request.history]
+    attachments = [
+        AttachmentInput(
+            filename=item.filename,
+            mime_type=item.mime_type,
+            content_base64=item.content_base64,
+            url=item.url,
+            kind=item.kind,
+        )
+        for item in request.attachments
+    ]
 
     if request.session_id is not None:
         async with SessionLocal() as db:
@@ -165,6 +195,7 @@ async def stream_chat(request: ChatRequest) -> StreamingResponse:
             query=request.message,
             history=history,
             session_id=request.session_id,
+            attachments=attachments,
         ),
         media_type="text/event-stream",
         headers={
@@ -244,3 +275,24 @@ async def get_chat_session(
             for message in session.messages
         ],
     )
+
+
+@router.delete(
+    "/api/chat/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_chat_session(
+    session_id: uuid.UUID,
+    user_email: str,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    deleted = await delete_session_for_user(
+        db,
+        user_email=user_email,
+        session_id=session_id,
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat session not found",
+        )

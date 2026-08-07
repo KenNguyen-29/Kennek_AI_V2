@@ -1,7 +1,9 @@
 "use client";
 
-import { Sparkles } from "lucide-react";
 import { signIn } from "next-auth/react";
+import Image from "next/image";
+
+import { ThemeToggle } from "../../theme/theme-toggle";
 
 function GoogleIcon() {
   return (
@@ -40,49 +42,65 @@ function GitHubIcon() {
 
 export default function SignInPage() {
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-4 py-12 text-slate-100">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.18),_transparent_55%),radial-gradient(circle_at_bottom_right,_rgba(99,102,241,0.16),_transparent_45%)]" />
-      <div className="pointer-events-none absolute -left-24 top-24 h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl" />
-      <div className="pointer-events-none absolute -right-16 bottom-16 h-80 w-80 rounded-full bg-indigo-500/10 blur-3xl" />
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-kennek-charcoal px-4 py-12 text-foreground">
+      <div className="pointer-events-none absolute inset-0 kennek-grid opacity-50" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,106,0,0.14),transparent_42%),radial-gradient(circle_at_80%_80%,rgba(255,106,0,0.08),transparent_40%)]" />
 
-      <section className="relative w-full max-w-md rounded-3xl border border-white/10 bg-white/5 p-8 shadow-2xl shadow-cyan-950/40 backdrop-blur-xl">
-        <div className="mb-8 flex flex-col items-center text-center">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-indigo-500 shadow-lg shadow-cyan-500/20">
-            <Sparkles className="h-7 w-7 text-white" />
+      <div className="absolute right-4 top-4 z-10 sm:right-6 sm:top-6">
+        <ThemeToggle />
+      </div>
+
+      <section className="kennek-frame relative w-full max-w-md kennek-frame-active">
+        <div className="kennek-frame-inner bg-kennek-panel p-8">
+          <div className="mb-8 flex flex-col items-center text-center">
+            <div className="relative mb-4 h-16 w-16 overflow-hidden clip-chamfer-lg ring-1 ring-kennek-orange/50">
+              <Image
+                src="/logo_Kennek.png"
+                alt="Kennek"
+                fill
+                sizes="64px"
+                className="object-cover"
+                priority
+              />
+            </div>
+            <p className="kennek-label mb-2">Access Gate</p>
+            <h1 className="text-3xl font-semibold tracking-tight text-kennek-ink">
+              Kennek AI
+            </h1>
+            <p className="mt-2 max-w-sm text-sm leading-6 text-kennek-mist">
+              Đăng nhập để vào Trung tâm Chỉ huy Phân tích — chat, web research
+              và kho tri thức.
+            </p>
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight text-white">
-            Kennek AI
-          </h1>
-          <p className="mt-2 max-w-sm text-sm leading-6 text-slate-300">
-            Đăng nhập để bắt đầu trò chuyện, tìm kiếm web và truy vấn tri thức
-            của bạn.
+
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => signIn("google", { callbackUrl: "/" })}
+              className="kennek-frame w-full"
+            >
+              <span className="kennek-frame-inner flex w-full items-center justify-center gap-3 bg-white px-4 py-3.5 text-sm font-semibold text-kennek-black transition hover:brightness-95">
+                <GoogleIcon />
+                Đăng nhập bằng Google
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => signIn("github", { callbackUrl: "/" })}
+              className="kennek-frame w-full"
+            >
+              <span className="kennek-frame-inner flex w-full items-center justify-center gap-3 bg-kennek-charcoal px-4 py-3.5 text-sm font-semibold text-kennek-ink transition hover:bg-kennek-steel">
+                <GitHubIcon />
+                Đăng nhập bằng GitHub
+              </span>
+            </button>
+          </div>
+
+          <p className="mt-8 text-center font-mono text-[10px] uppercase tracking-[0.16em] leading-5 text-kennek-ash">
+            Authorized operators only · Kennek Systems
           </p>
         </div>
-
-        <div className="space-y-3">
-          <button
-            type="button"
-            onClick={() => signIn("google", { callbackUrl: "/" })}
-            className="group flex w-full items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white px-4 py-3.5 text-sm font-semibold text-slate-900 transition hover:-translate-y-0.5 hover:bg-slate-100 hover:shadow-lg hover:shadow-white/10"
-          >
-            <GoogleIcon />
-            Đăng nhập bằng Google
-          </button>
-
-          <button
-            type="button"
-            onClick={() => signIn("github", { callbackUrl: "/" })}
-            className="group flex w-full items-center justify-center gap-3 rounded-2xl border border-white/10 bg-slate-900 px-4 py-3.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-lg hover:shadow-black/30"
-          >
-            <GitHubIcon />
-            Đăng nhập bằng GitHub
-          </button>
-        </div>
-
-        <p className="mt-8 text-center text-xs leading-5 text-slate-400">
-          Bằng việc tiếp tục, bạn đồng ý với điều khoản sử dụng và chính sách bảo
-          mật của Kennek AI.
-        </p>
       </section>
     </main>
   );

@@ -1,7 +1,6 @@
 import json
 import logging
 from collections.abc import AsyncIterator, Sequence
-from functools import lru_cache
 from typing import Any
 
 from langchain_community.tools.tavily_search import TavilySearchResults
@@ -13,6 +12,14 @@ from langgraph.prebuilt import create_react_agent
 
 from app.agent.system_prompt import DOCUMENT_PROCESSOR_SYSTEM_PROMPT
 from app.core.config import get_settings
+from app.core.groq_models import FALLBACK_MODEL_ID, GroqTask
+from app.services.groq_client import moderate_content, transcribe_audio
+from app.services.model_router import (
+    AttachmentInput,
+    ModelRoute,
+    build_vision_messages,
+    select_groq_model,
+)
 from app.services.vector_service import query_vector_store
 
 logger = logging.getLogger(__name__)
@@ -47,9 +54,6 @@ def _normalize_history(
     ]
 
 
-
-
-
 @tool
 def retrieve_knowledge_base(query: str) -> str:
     """Retrieve relevant context from uploaded documents in the knowledge base."""
@@ -63,26 +67,32 @@ def retrieve_knowledge_base(query: str) -> str:
     )
 
 
-@lru_cache
-def _get_chat_model() -> ChatGroq:
+def _build_chat_model(model_id: str, *, temperature: float = 0.2) -> ChatGroq:
     settings = get_settings()
-    return ChatGroq(
-        api_key=settings.groq_api_key,
-        model=settings.model_name,
-        streaming=True,
-        temperature=0.2,
-    )
+    try:
+        return ChatGroq(
+            api_key=settings.groq_api_key,
+            model=model_id,
+            streaming=True,
+            temperature=temperature,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to init ChatGroq(%s); falling back to %s",
+            model_id,
+            FALLBACK_MODEL_ID,
+        )
+        return ChatGroq(
+            api_key=settings.groq_api_key,
+            model=FALLBACK_MODEL_ID,
+            streaming=True,
+            temperature=temperature,
+        )
 
 
-@lru_cache
-def _get_agent() -> Any:
+def _build_react_agent(model_id: str) -> Any:
     settings = get_settings()
-    model = ChatGroq(
-        api_key=settings.groq_api_key,
-        model=settings.model_name,
-        streaming=True,
-        temperature=0.2,
-    )
+    model = _build_chat_model(model_id)
     search_tool = TavilySearchResults(
         api_wrapper=TavilySearchAPIWrapper(
             tavily_api_key=settings.tavily_api_key,
@@ -119,11 +129,26 @@ def _extract_plain_text(chunk: Any) -> str:
     return content if isinstance(content, str) else ""
 
 
+def _history_to_lc_messages(history: list[dict[str, str]]) -> list[Any]:
+    lc_messages: list[Any] = []
+    for message in history[-8:]:
+        role = message["role"]
+        content = message["content"]
+        if role == "user":
+            lc_messages.append(HumanMessage(content=content))
+        elif role == "assistant":
+            lc_messages.append(AIMessage(content=content))
+        elif role == "system":
+            lc_messages.append(SystemMessage(content=content))
+    return lc_messages
+
+
 async def _stream_rag_answer(
     *,
     query: str,
     history: list[dict[str, str]],
     contexts: list[str],
+    model_id: str,
 ) -> AsyncIterator[str]:
     yield _format_sse(
         {"type": "status", "content": "Reading uploaded documents..."},
@@ -142,18 +167,10 @@ async def _stream_rag_answer(
     )
 
     lc_messages: list[Any] = [SystemMessage(content=prompt)]
-    for message in history[-8:]:
-        role = message["role"]
-        content = message["content"]
-        if role == "user":
-            lc_messages.append(HumanMessage(content=content))
-        elif role == "assistant":
-            lc_messages.append(AIMessage(content=content))
-        elif role == "system":
-            lc_messages.append(SystemMessage(content=content))
+    lc_messages.extend(_history_to_lc_messages(history))
     lc_messages.append(HumanMessage(content=user_content))
 
-    async for chunk in _get_chat_model().astream(lc_messages):
+    async for chunk in _build_chat_model(model_id).astream(lc_messages):
         text = _extract_plain_text(chunk)
         if text:
             yield _format_sse({"type": "token", "content": text})
@@ -163,11 +180,13 @@ async def _stream_agent_answer(
     *,
     query: str,
     history: list[dict[str, str]],
+    model_id: str,
 ) -> AsyncIterator[str]:
     messages = [*history, {"role": "user", "content": query}]
     suppress_text = False
+    agent = _build_react_agent(model_id)
 
-    async for event in _get_agent().astream_events(
+    async for event in agent.astream_events(
         {"messages": messages},
         version="v2",
     ):
@@ -215,26 +234,164 @@ async def _stream_agent_answer(
             suppress_text = bool(tool_calls)
 
 
+async def _stream_direct_chat(
+    *,
+    query: str,
+    history: list[dict[str, str]],
+    model_id: str,
+    system_prompt: str | None = None,
+) -> AsyncIterator[str]:
+    """Stream plain chat (reasoning / fallback) without tool calling."""
+    lc_messages: list[Any] = []
+    if system_prompt:
+        lc_messages.append(SystemMessage(content=system_prompt))
+    lc_messages.extend(_history_to_lc_messages(history))
+    lc_messages.append(HumanMessage(content=query))
+
+    async for chunk in _build_chat_model(model_id, temperature=0.1).astream(lc_messages):
+        text = _extract_plain_text(chunk)
+        if text:
+            yield _format_sse({"type": "token", "content": text})
+
+
+async def _stream_vision_answer(
+    *,
+    query: str,
+    history: list[dict[str, str]],
+    route: ModelRoute,
+) -> AsyncIterator[str]:
+    yield _format_sse(
+        {"type": "status", "content": "Analyzing image (vision / OCR)..."},
+    )
+    messages = build_vision_messages(
+        prompt=query,
+        attachments=route.attachments,
+        system_prompt=DOCUMENT_PROCESSOR_SYSTEM_PROMPT,
+        history=history,
+    )
+    # LangChain HumanMessage accepts multimodal content lists.
+    lc_messages: list[Any] = []
+    for message in messages:
+        role = message["role"]
+        content = message["content"]
+        if role == "system":
+            lc_messages.append(SystemMessage(content=content if isinstance(content, str) else str(content)))
+        elif role == "assistant":
+            lc_messages.append(
+                AIMessage(content=content if isinstance(content, str) else str(content)),
+            )
+        else:
+            lc_messages.append(HumanMessage(content=content))
+
+    async for chunk in _build_chat_model(route.model_id).astream(lc_messages):
+        text = _extract_plain_text(chunk)
+        if text:
+            yield _format_sse({"type": "token", "content": text})
+
+
 async def stream_agent_response(
     query: str,
     chat_history: Sequence[dict[str, Any]],
+    attachments: Sequence[AttachmentInput] | None = None,
 ) -> AsyncIterator[str]:
     history = _normalize_history(chat_history)
-    contexts = query_vector_store(query)
+    files = list(attachments or [])
+    settings = get_settings()
 
     try:
-        # Prefer direct RAG when knowledge base has relevant chunks.
-        # Avoids Groq tool-call token leakage in the SSE stream.
+        if settings.enable_content_moderation and query.strip():
+            gate = await moderate_content(query)
+            if not gate["allowed"]:
+                yield _format_sse(
+                    {
+                        "type": "error",
+                        "content": "Request blocked by content moderation.",
+                    },
+                )
+                return
+
+        route = select_groq_model(query, files)
+        yield _format_sse(
+            {
+                "type": "status",
+                "content": f"Routing → {route.model_id} ({route.task.value})",
+            },
+        )
+
+        # Speech-to-text first, then continue as text analysis on transcript.
+        if route.task == GroqTask.SPEECH:
+            yield _format_sse(
+                {"type": "status", "content": "Transcribing audio..."},
+            )
+            audio = next(
+                (
+                    item
+                    for item in files
+                    if (item.kind == "audio")
+                    or (item.filename and item.filename.lower().endswith(
+                        (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".webm"),
+                    ))
+                    or (item.mime_type or "").startswith("audio/")
+                ),
+                files[0] if files else None,
+            )
+            if audio is None:
+                raise ValueError("Speech route selected but no audio attachment found")
+
+            transcript = await transcribe_audio(audio)
+            yield _format_sse(
+                {
+                    "type": "status",
+                    "content": "Transcription complete. Analyzing text...",
+                },
+            )
+            query = (
+                f"{query.strip()}\n\n[Transcript]\n{transcript}".strip()
+                if query.strip()
+                else transcript
+            )
+            route = select_groq_model(query, attachments=None)
+
+        if route.task == GroqTask.VISION:
+            async for chunk in _stream_vision_answer(
+                query=query,
+                history=history,
+                route=route,
+            ):
+                yield chunk
+            return
+
+        if route.task == GroqTask.REASONING:
+            async for chunk in _stream_direct_chat(
+                query=query,
+                history=history,
+                model_id=route.model_id,
+                system_prompt=(
+                    f"{DOCUMENT_PROCESSOR_SYSTEM_PROMPT}\n\n"
+                    "Use careful chain-of-thought. Show step-by-step reasoning "
+                    "for math, logic, and hard debugging problems."
+                ),
+            ):
+                yield chunk
+            return
+
+        # Default text path: RAG-first, then ReAct agent with tools.
+        contexts = query_vector_store(query)
         if contexts:
             async for chunk in _stream_rag_answer(
                 query=query,
                 history=history,
                 contexts=contexts,
+                model_id=route.model_id,
             ):
                 yield chunk
             return
 
-        async for chunk in _stream_agent_answer(query=query, history=history):
+        async for chunk in _stream_agent_answer(
+            query=query,
+            history=history,
+            model_id=route.model_id,
+        ):
             yield chunk
     except Exception:
         logger.exception("Agent streaming failed")
