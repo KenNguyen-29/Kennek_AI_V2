@@ -190,67 +190,104 @@ function createMessage(
 
 function MarkdownMessage({ content }: { content: string }) {
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        a: ({ children, ...props }) => (
-          <a
-            {...props}
-            className="text-kennek-orange underline decoration-kennek-orange/40 underline-offset-4 hover:text-[#ff8a33]"
-            rel="noreferrer"
-            target="_blank"
-          >
-            {children}
-          </a>
-        ),
-        code: ({ children, className, ...props }) => {
-          const isCodeBlock = className?.startsWith("language-");
-
-          return (
-            <code
+    <div className="assistant-prose text-[15px] leading-7 text-kennek-ink">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ children, ...props }) => (
+            <a
               {...props}
-              className={
-                isCodeBlock
-                  ? `${className} block min-w-full font-mono text-sm leading-6 text-kennek-mist`
-                  : "bg-kennek-black/80 px-1.5 py-0.5 font-mono text-[0.9em] text-kennek-orange"
-              }
+              className="font-medium text-kennek-orange underline decoration-kennek-orange/35 underline-offset-4 transition hover:text-[#ff8a33]"
+              rel="noreferrer"
+              target="_blank"
             >
               {children}
-            </code>
-          );
-        },
-        h1: ({ children }) => (
-          <h1 className="mb-3 mt-5 text-2xl font-semibold text-kennek-ink">
-            {children}
-          </h1>
-        ),
-        h2: ({ children }) => (
-          <h2 className="mb-3 mt-5 text-xl font-semibold text-kennek-ink">
-            {children}
-          </h2>
-        ),
-        h3: ({ children }) => (
-          <h3 className="mb-2 mt-4 text-lg font-semibold text-kennek-ink">
-            {children}
-          </h3>
-        ),
-        li: ({ children }) => <li className="ml-5 list-disc">{children}</li>,
-        ol: ({ children }) => (
-          <ol className="my-3 space-y-1 [&>li]:list-decimal">{children}</ol>
-        ),
-        p: ({ children }) => (
-          <p className="my-2 leading-7 first:mt-0 last:mb-0">{children}</p>
-        ),
-        pre: ({ children }) => (
-          <pre className="my-4 overflow-x-auto rounded-xl border border-white/10 bg-slate-950 p-4 shadow-inner">
-            {children}
-          </pre>
-        ),
-        ul: ({ children }) => <ul className="my-3 space-y-1">{children}</ul>,
-      }}
-    >
-      {content}
-    </ReactMarkdown>
+            </a>
+          ),
+          blockquote: ({ children }) => (
+            <blockquote className="my-3 border-l-2 border-kennek-orange/70 bg-kennek-black/25 py-2 pl-4 pr-3 text-kennek-mist">
+              {children}
+            </blockquote>
+          ),
+          code: ({ children, className, ...props }) => {
+            const isCodeBlock = className?.startsWith("language-");
+
+            return (
+              <code
+                {...props}
+                className={
+                  isCodeBlock
+                    ? `${className} block min-w-full font-mono text-[13px] leading-6 text-kennek-mist`
+                    : "rounded-sm bg-kennek-black/70 px-1.5 py-0.5 font-mono text-[0.86em] text-kennek-orange"
+                }
+              >
+                {children}
+              </code>
+            );
+          },
+          h1: ({ children }) => (
+            <h1 className="mb-3 mt-1 border-b border-kennek-steel/40 pb-2 text-xl font-semibold tracking-tight text-kennek-ink first:mt-0">
+              {children}
+            </h1>
+          ),
+          h2: ({ children }) => (
+            <h2 className="mb-2.5 mt-5 text-lg font-semibold tracking-tight text-kennek-ink first:mt-0">
+              {children}
+            </h2>
+          ),
+          h3: ({ children }) => (
+            <h3 className="mb-2 mt-4 text-base font-semibold text-kennek-ink first:mt-0">
+              {children}
+            </h3>
+          ),
+          hr: () => <hr className="my-5 border-kennek-steel/50" />,
+          li: ({ children }) => (
+            <li className="leading-7 marker:text-kennek-orange">{children}</li>
+          ),
+          ol: ({ children }) => (
+            <ol className="my-3 list-decimal space-y-1.5 pl-5">{children}</ol>
+          ),
+          p: ({ children }) => (
+            <p className="my-2.5 leading-7 text-kennek-ink/95 first:mt-0 last:mb-0">
+              {children}
+            </p>
+          ),
+          pre: ({ children }) => (
+            <pre className="my-4 overflow-x-auto border border-kennek-steel/60 bg-kennek-black/80 p-4 clip-chamfer-sm">
+              {children}
+            </pre>
+          ),
+          strong: ({ children }) => (
+            <strong className="font-semibold text-kennek-ink">{children}</strong>
+          ),
+          table: ({ children }) => (
+            <div className="my-4 overflow-x-auto border border-kennek-steel/50">
+              <table className="w-full min-w-[320px] border-collapse text-left text-sm">
+                {children}
+              </table>
+            </div>
+          ),
+          tbody: ({ children }) => <tbody>{children}</tbody>,
+          td: ({ children }) => (
+            <td className="border-t border-kennek-steel/40 px-3 py-2 align-top text-kennek-mist">
+              {children}
+            </td>
+          ),
+          th: ({ children }) => (
+            <th className="bg-kennek-black/40 px-3 py-2 font-semibold text-kennek-ink">
+              {children}
+            </th>
+          ),
+          thead: ({ children }) => <thead>{children}</thead>,
+          tr: ({ children }) => <tr className="even:bg-kennek-black/15">{children}</tr>,
+          ul: ({ children }) => (
+            <ul className="my-3 list-disc space-y-1.5 pl-5">{children}</ul>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
   );
 }
 

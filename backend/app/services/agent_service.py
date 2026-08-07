@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator, Sequence
@@ -6,9 +7,7 @@ from typing import Any
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_core.tools import tool
 from langchain_groq import ChatGroq
-from langgraph.prebuilt import create_react_agent
 
 from app.agent.system_prompt import DOCUMENT_PROCESSOR_SYSTEM_PROMPT
 from app.core.config import get_settings
@@ -23,8 +22,7 @@ from app.services.model_router import (
 from app.services.vector_service import query_vector_store
 
 logger = logging.getLogger(__name__)
-TAVILY_TOOL_NAME = "tavily_search_results_json"
-KNOWLEDGE_TOOL_NAME = "retrieve_knowledge_base"
+TAVILY_MAX_RESULTS = 6
 
 
 def _format_sse(payload: dict[str, str]) -> str:
@@ -54,19 +52,6 @@ def _normalize_history(
     ]
 
 
-@tool
-def retrieve_knowledge_base(query: str) -> str:
-    """Retrieve relevant context from uploaded documents in the knowledge base."""
-    contexts = query_vector_store(query)
-    if not contexts:
-        return "No relevant context was found in the knowledge base."
-
-    return "\n\n".join(
-        f"[Context {index}] {context}"
-        for index, context in enumerate(contexts, start=1)
-    )
-
-
 def _build_chat_model(model_id: str, *, temperature: float = 0.2) -> ChatGroq:
     settings = get_settings()
     try:
@@ -90,30 +75,57 @@ def _build_chat_model(model_id: str, *, temperature: float = 0.2) -> ChatGroq:
         )
 
 
-def _build_react_agent(model_id: str, *, temperature: float = 0.2) -> Any:
+def _run_tavily_search(query: str, *, max_results: int = TAVILY_MAX_RESULTS) -> str:
+    """Always-on web search; returns a readable block for the LLM."""
     settings = get_settings()
-    model = _build_chat_model(model_id, temperature=temperature)
-    search_tool = TavilySearchResults(
+    if not settings.tavily_api_key:
+        logger.warning("TAVILY_API_KEY missing; skipping auto web search")
+        return ""
+
+    search = TavilySearchResults(
+        max_results=max_results,
         api_wrapper=TavilySearchAPIWrapper(
             tavily_api_key=settings.tavily_api_key,
         ),
     )
-    return create_react_agent(
-        model=model,
-        tools=[search_tool, retrieve_knowledge_base],
-        prompt=DOCUMENT_PROCESSOR_SYSTEM_PROMPT,
-    )
+    try:
+        raw = search.invoke({"query": query})
+    except Exception:
+        logger.exception("Auto Tavily search failed")
+        return ""
 
+    items: list[Any]
+    if isinstance(raw, list):
+        items = raw
+    elif isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            items = parsed if isinstance(parsed, list) else [{"content": raw}]
+        except json.JSONDecodeError:
+            return raw.strip()
+    else:
+        items = [raw]
 
-def _chunk_has_tool_calls(chunk: Any) -> bool:
-    if getattr(chunk, "tool_call_chunks", None):
-        return True
-    additional_kwargs = getattr(chunk, "additional_kwargs", None) or {}
-    if additional_kwargs.get("tool_calls") or additional_kwargs.get("function_call"):
-        return True
-    if getattr(chunk, "tool_calls", None):
-        return True
-    return False
+    lines: list[str] = []
+    for index, item in enumerate(items, start=1):
+        if isinstance(item, dict):
+            title = str(item.get("title") or item.get("url") or f"Result {index}")
+            url = str(item.get("url") or "").strip()
+            content = str(
+                item.get("content")
+                or item.get("snippet")
+                or item.get("raw_content")
+                or "",
+            ).strip()
+            header = f"[{index}] {title}"
+            if url:
+                header = f"{header}\nURL: {url}"
+            body = content or "(no snippet)"
+            lines.append(f"{header}\n{body}")
+        else:
+            lines.append(f"[{index}] {item}")
+
+    return "\n\n".join(lines).strip()
 
 
 def _extract_plain_text(chunk: Any) -> str:
@@ -143,115 +155,57 @@ def _history_to_lc_messages(history: list[dict[str, str]]) -> list[Any]:
     return lc_messages
 
 
-async def _stream_rag_answer(
+async def _stream_research_answer(
     *,
     query: str,
     history: list[dict[str, str]],
-    contexts: list[str],
     model_id: str,
     temperature: float = 0.2,
+    system_prompt: str | None = None,
 ) -> AsyncIterator[str]:
+    """Always search Tavily (+ optional KB), then synthesize a full final answer."""
     yield _format_sse(
-        {"type": "status", "content": "Reading uploaded documents..."},
+        {"type": "status", "content": "Searching web via Tavily..."},
+    )
+    web_block = await asyncio.to_thread(_run_tavily_search, query)
+
+    kb_contexts = await asyncio.to_thread(query_vector_store, query)
+    if kb_contexts:
+        yield _format_sse(
+            {"type": "status", "content": "Reading uploaded documents..."},
+        )
+
+    yield _format_sse(
+        {"type": "status", "content": "Synthesizing detailed answer..."},
     )
 
-    context_block = "\n\n---\n\n".join(contexts)
-    prompt = (
-        f"{DOCUMENT_PROCESSOR_SYSTEM_PROMPT}\n\n"
-        "Bạn ĐÃ nhận được nội dung tài liệu bên dưới. "
-        "Hãy phân tích trực tiếp, không nói rằng chưa có file. "
-        "Trích dẫn nguồn/file khi có thể."
-    )
-    user_content = (
-        f"Câu hỏi của người dùng:\n{query}\n\n"
-        f"Nội dung tài liệu từ kho tri thức:\n{context_block}"
+    prompt = system_prompt or DOCUMENT_PROCESSOR_SYSTEM_PROMPT
+    research_rules = (
+        f"{prompt}\n\n"
+        "Bạn ĐÃ được cung cấp kết quả tìm kiếm web (Tavily) và có thể có kho tri thức. "
+        "Hãy tổng hợp thành một câu trả lời cuối **đầy đủ, chi tiết, cập nhật nhất**. "
+        "Ưu tiên nguồn web khi thông tin thay đổi theo thời gian. "
+        "Trích dẫn URL quan trọng. Không trả lời quá ngắn."
     )
 
-    lc_messages: list[Any] = [SystemMessage(content=prompt)]
+    parts = [f"Câu hỏi của người dùng:\n{query}"]
+    if web_block:
+        parts.append(f"Kết quả tìm kiếm web (Tavily):\n{web_block}")
+    else:
+        parts.append(
+            "Kết quả tìm kiếm web (Tavily): (không có / lỗi). "
+            "Hãy trả lời dựa trên kiến thức của bạn và ghi rõ phần nào có thể đã cũ.",
+        )
+    if kb_contexts:
+        parts.append(
+            "Nội dung tài liệu từ kho tri thức:\n"
+            + "\n\n---\n\n".join(kb_contexts),
+        )
+
+    user_content = "\n\n".join(parts)
+    lc_messages: list[Any] = [SystemMessage(content=research_rules)]
     lc_messages.extend(_history_to_lc_messages(history))
     lc_messages.append(HumanMessage(content=user_content))
-
-    async for chunk in _build_chat_model(model_id, temperature=temperature).astream(
-        lc_messages,
-    ):
-        text = _extract_plain_text(chunk)
-        if text:
-            yield _format_sse({"type": "token", "content": text})
-
-
-async def _stream_agent_answer(
-    *,
-    query: str,
-    history: list[dict[str, str]],
-    model_id: str,
-    temperature: float = 0.2,
-) -> AsyncIterator[str]:
-    messages = [*history, {"role": "user", "content": query}]
-    suppress_text = False
-    agent = _build_react_agent(model_id, temperature=temperature)
-
-    async for event in agent.astream_events(
-        {"messages": messages},
-        version="v2",
-    ):
-        event_type = event["event"]
-        event_name = event.get("name")
-
-        if event_type == "on_chat_model_start":
-            suppress_text = False
-            continue
-
-        if event_type == "on_tool_start":
-            suppress_text = True
-            if event_name == TAVILY_TOOL_NAME:
-                yield _format_sse(
-                    {"type": "status", "content": "Searching web..."},
-                )
-            elif event_name == KNOWLEDGE_TOOL_NAME:
-                yield _format_sse(
-                    {
-                        "type": "status",
-                        "content": "Reading uploaded documents...",
-                    },
-                )
-            continue
-
-        if event_type == "on_tool_end":
-            suppress_text = True
-            continue
-
-        if event_type == "on_chat_model_stream":
-            chunk = event["data"]["chunk"]
-            if _chunk_has_tool_calls(chunk):
-                suppress_text = True
-                continue
-            if suppress_text:
-                continue
-            text = _extract_plain_text(chunk)
-            if text:
-                yield _format_sse({"type": "token", "content": text})
-            continue
-
-        if event_type == "on_chat_model_end":
-            output = event["data"].get("output")
-            tool_calls = getattr(output, "tool_calls", None) or []
-            suppress_text = bool(tool_calls)
-
-
-async def _stream_direct_chat(
-    *,
-    query: str,
-    history: list[dict[str, str]],
-    model_id: str,
-    system_prompt: str | None = None,
-    temperature: float = 0.2,
-) -> AsyncIterator[str]:
-    """Stream plain chat (reasoning / fallback) without tool calling."""
-    lc_messages: list[Any] = []
-    if system_prompt:
-        lc_messages.append(SystemMessage(content=system_prompt))
-    lc_messages.extend(_history_to_lc_messages(history))
-    lc_messages.append(HumanMessage(content=query))
 
     async for chunk in _build_chat_model(model_id, temperature=temperature).astream(
         lc_messages,
@@ -435,100 +389,36 @@ async def stream_agent_response(
                     yield chunk
                 return
 
-            async for chunk in _stream_direct_chat(
+            # Vision mode without image → auto Tavily + KB synthesis.
+            async for chunk in _stream_research_answer(
                 query=query,
                 history=history,
                 model_id=route.model_id,
+                temperature=temperature,
                 system_prompt=command_system_prompts.get(
                     "vision",
                     DOCUMENT_PROCESSOR_SYSTEM_PROMPT,
                 ),
-                temperature=temperature,
             ):
                 yield chunk
             return
 
-        if route.task == GroqTask.REASONING:
-            async for chunk in _stream_direct_chat(
-                query=query,
-                history=history,
-                model_id=route.model_id,
-                system_prompt=command_system_prompts.get(
-                    "reasoning",
-                    (
-                        f"{DOCUMENT_PROCESSOR_SYSTEM_PROMPT}\n\n"
-                        "Use careful chain-of-thought. Show step-by-step reasoning "
-                        "for math, logic, and hard debugging problems."
-                    ),
-                ),
-                temperature=temperature,
-            ):
-                yield chunk
-            return
+        # All text modes: always Tavily (+ KB if any), then full synthesized answer.
+        prompt_key = command or (
+            "reasoning" if route.task == GroqTask.REASONING else mode
+        )
+        system_prompt = command_system_prompts.get(
+            prompt_key,
+            DOCUMENT_PROCESSOR_SYSTEM_PROMPT,
+        )
+        agent_temperature = 0.1 if mode == "fast" else temperature
 
-        # Fast / code / balanced: direct chat (skip ReAct tools for speed & focus).
-        if mode in {"fast", "code", "balanced"} and command is None:
-            async for chunk in _stream_direct_chat(
-                query=query,
-                history=history,
-                model_id=route.model_id,
-                system_prompt=command_system_prompts.get(
-                    mode,
-                    DOCUMENT_PROCESSOR_SYSTEM_PROMPT,
-                ),
-                temperature=0.1 if mode == "fast" else temperature,
-            ):
-                yield chunk
-            return
-
-        # Default text path: RAG-first, then ReAct agent with tools.
-        # Prefer RAG for document/spreadsheet commands.
-        contexts = query_vector_store(query)
-        if contexts or command in {"pdf", "excel"}:
-            if not contexts and command in {"pdf", "excel"}:
-                async for chunk in _stream_direct_chat(
-                    query=query,
-                    history=history,
-                    model_id=route.model_id,
-                    system_prompt=command_system_prompts.get(
-                        command,
-                        DOCUMENT_PROCESSOR_SYSTEM_PROMPT,
-                    ),
-                    temperature=temperature,
-                ):
-                    yield chunk
-                return
-
-            if contexts:
-                async for chunk in _stream_rag_answer(
-                    query=query,
-                    history=history,
-                    contexts=contexts,
-                    model_id=route.model_id,
-                    temperature=temperature,
-                ):
-                    yield chunk
-                return
-
-        if command in {"code", "pdf", "excel"}:
-            async for chunk in _stream_direct_chat(
-                query=query,
-                history=history,
-                model_id=route.model_id,
-                system_prompt=command_system_prompts.get(
-                    command,
-                    DOCUMENT_PROCESSOR_SYSTEM_PROMPT,
-                ),
-                temperature=temperature,
-            ):
-                yield chunk
-            return
-
-        async for chunk in _stream_agent_answer(
+        async for chunk in _stream_research_answer(
             query=query,
             history=history,
             model_id=route.model_id,
-            temperature=temperature,
+            temperature=agent_temperature,
+            system_prompt=system_prompt,
         ):
             yield chunk
     except Exception:
