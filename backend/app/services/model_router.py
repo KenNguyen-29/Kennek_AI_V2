@@ -11,8 +11,10 @@ from typing import Any, Literal
 
 from app.core.groq_models import (
     AUDIO_TRANSCRIPTIONS_ENDPOINT,
+    BALANCED_MODEL_ID,
     CHAT_COMPLETIONS_ENDPOINT,
     FALLBACK_MODEL_ID,
+    FAST_MODEL_ID,
     GROQ_MODEL_IDS,
     WHISPER_ACCURATE_MODEL,
     GroqTask,
@@ -179,6 +181,8 @@ def select_groq_model(
     *,
     for_moderation: bool = False,
     prefer_accurate_whisper: bool = False,
+    active_command: str | None = None,
+    prompt_mode: str | None = None,
 ) -> ModelRoute:
     """
     Classify request/attachment and return the Groq model route.
@@ -186,9 +190,11 @@ def select_groq_model(
     Priority:
       1. Moderation (explicit gate)
       2. Audio → Whisper
-      3. Image / vision → Qwen
-      4. Deep reasoning keywords → DeepSeek R1
-      5. Default text / code / CSV / JSON → Llama 3.3 70B
+      3. Explicit @ command override (pdf/excel/vision/code/reasoning)
+      4. Prompt mode combobox (fast / balanced / reasoning / code)
+      5. Image / vision → Qwen
+      6. Deep reasoning keywords → DeepSeek R1
+      7. Default text / code / CSV / JSON → Llama 3.3 70B
     """
     try:
         if for_moderation:
@@ -213,6 +219,66 @@ def select_groq_model(
                 model_id=model_id,
                 endpoint=AUDIO_TRANSCRIPTIONS_ENDPOINT,
                 reason="Audio attachment detected (speech-to-text)",
+                attachments=files,
+            )
+
+        command = (active_command or "").strip().lower() or None
+        if command == "vision":
+            return ModelRoute(
+                task=GroqTask.VISION,
+                model_id=GROQ_MODEL_IDS[GroqTask.VISION],
+                endpoint=CHAT_COMPLETIONS_ENDPOINT,
+                reason="Active command @vision",
+                attachments=files,
+            )
+        if command == "reasoning":
+            return ModelRoute(
+                task=GroqTask.REASONING,
+                model_id=GROQ_MODEL_IDS[GroqTask.REASONING],
+                endpoint=CHAT_COMPLETIONS_ENDPOINT,
+                reason="Active command @reasoning",
+                attachments=files,
+            )
+        if command in {"pdf", "excel", "code"}:
+            return ModelRoute(
+                task=GroqTask.TEXT,
+                model_id=GROQ_MODEL_IDS[GroqTask.TEXT],
+                endpoint=CHAT_COMPLETIONS_ENDPOINT,
+                reason=f"Active command @{command}",
+                attachments=files,
+            )
+
+        mode = (prompt_mode or "auto").strip().lower() or "auto"
+        if mode == "fast":
+            return ModelRoute(
+                task=GroqTask.TEXT,
+                model_id=FAST_MODEL_ID,
+                endpoint=CHAT_COMPLETIONS_ENDPOINT,
+                reason="Prompt mode: fast",
+                attachments=files,
+            )
+        if mode == "balanced":
+            return ModelRoute(
+                task=GroqTask.TEXT,
+                model_id=BALANCED_MODEL_ID,
+                endpoint=CHAT_COMPLETIONS_ENDPOINT,
+                reason="Prompt mode: balanced",
+                attachments=files,
+            )
+        if mode == "reasoning":
+            return ModelRoute(
+                task=GroqTask.REASONING,
+                model_id=GROQ_MODEL_IDS[GroqTask.REASONING],
+                endpoint=CHAT_COMPLETIONS_ENDPOINT,
+                reason="Prompt mode: reasoning",
+                attachments=files,
+            )
+        if mode == "code":
+            return ModelRoute(
+                task=GroqTask.TEXT,
+                model_id=BALANCED_MODEL_ID,
+                endpoint=CHAT_COMPLETIONS_ENDPOINT,
+                reason="Prompt mode: code",
                 attachments=files,
             )
 

@@ -22,6 +22,11 @@ export const metadata: Metadata = {
   title: "Kennek AI — Analytics Command Center",
   description:
     "Industrial AI command center powered by Groq, Tavily, and RAG",
+  icons: {
+    icon: [{ url: "/logo_Kennek.png", type: "image/png" }],
+    apple: [{ url: "/logo_Kennek.png", type: "image/png" }],
+    shortcut: ["/logo_Kennek.png"],
+  },
 };
 
 const themeInitScript = `

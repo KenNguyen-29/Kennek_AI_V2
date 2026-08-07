@@ -20,6 +20,10 @@ GROQ_MODEL_IDS: dict[GroqTask, str] = {
     GroqTask.MODERATION: "openai/gpt-oss-safeguard-20b",
 }
 
+# Explicit prompt-mode overrides (combobox).
+FAST_MODEL_ID = "llama-3.1-8b-instant"
+BALANCED_MODEL_ID = GROQ_MODEL_IDS[GroqTask.TEXT]
+
 # Higher-accuracy Whisper fallback when turbo quality is insufficient.
 WHISPER_ACCURATE_MODEL = "whisper-large-v3"
 

@@ -1,10 +1,11 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.models.chat import ChatMessage, ChatSession, User
 
 
@@ -30,6 +31,85 @@ async def get_or_create_user(
     db.add(user)
     await db.flush()
     return user
+
+
+async def get_user_preferences(
+    db: AsyncSession,
+    *,
+    user_email: str,
+) -> User:
+    return await get_or_create_user(db, email=user_email)
+
+
+async def set_user_chat_retention(
+    db: AsyncSession,
+    *,
+    user_email: str,
+    auto_delete_chats_after_days: int | None,
+) -> User:
+    settings = get_settings()
+    if auto_delete_chats_after_days is not None and (
+        auto_delete_chats_after_days != settings.chat_retention_days
+    ):
+        raise ValueError(
+            f"auto_delete_chats_after_days must be null or {settings.chat_retention_days}",
+        )
+
+    user = await get_or_create_user(db, email=user_email)
+    user.auto_delete_chats_after_days = auto_delete_chats_after_days
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def purge_expired_sessions_for_user(
+    db: AsyncSession,
+    *,
+    user_email: str,
+    commit: bool = True,
+) -> int:
+    result = await db.execute(select(User).where(User.email == user_email))
+    user = result.scalar_one_or_none()
+    if user is None or user.auto_delete_chats_after_days is None:
+        return 0
+
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        days=user.auto_delete_chats_after_days,
+    )
+    delete_result = await db.execute(
+        delete(ChatSession).where(
+            ChatSession.user_id == user.id,
+            ChatSession.updated_at < cutoff,
+        ),
+    )
+    if commit:
+        await db.commit()
+    return int(delete_result.rowcount or 0)
+
+
+async def purge_all_expired_sessions(db: AsyncSession) -> int:
+    result = await db.execute(
+        select(User).where(User.auto_delete_chats_after_days.is_not(None)),
+    )
+    users = list(result.scalars().all())
+    total = 0
+    now = datetime.now(timezone.utc)
+
+    for user in users:
+        days = user.auto_delete_chats_after_days
+        if days is None or days <= 0:
+            continue
+        cutoff = now - timedelta(days=days)
+        delete_result = await db.execute(
+            delete(ChatSession).where(
+                ChatSession.user_id == user.id,
+                ChatSession.updated_at < cutoff,
+            ),
+        )
+        total += int(delete_result.rowcount or 0)
+
+    await db.commit()
+    return total
 
 
 async def save_chat_turn(
@@ -88,6 +168,8 @@ async def list_sessions_for_user(
     *,
     user_email: str,
 ) -> list[ChatSession]:
+    await purge_expired_sessions_for_user(db, user_email=user_email)
+
     result = await db.execute(
         select(ChatSession)
         .join(User)

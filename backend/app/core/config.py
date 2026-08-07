@@ -20,6 +20,14 @@ class Settings(BaseSettings):
         default=False,
         validation_alias="ENABLE_CONTENT_MODERATION",
     )
+    chat_retention_days: int = Field(
+        default=30,
+        validation_alias="CHAT_RETENTION_DAYS",
+    )
+    chat_purge_interval_seconds: int = Field(
+        default=3600,
+        validation_alias="CHAT_PURGE_INTERVAL_SECONDS",
+    )
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_DIR / ".env",

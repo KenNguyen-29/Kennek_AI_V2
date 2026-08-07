@@ -48,6 +48,13 @@ class ChatRequest(BaseModel):
     session_id: uuid.UUID | None = None
     history: list[StreamChatMessage] = Field(default_factory=list)
     attachments: list[ChatAttachment] = Field(default_factory=list)
+    temperature: float = Field(default=0.2, ge=0.0, le=1.0)
+    active_command: (
+        Literal["pdf", "excel", "vision", "code", "reasoning"] | None
+    ) = None
+    prompt_mode: Literal["auto", "fast", "balanced", "reasoning", "code"] = (
+        "auto"
+    )
 
 
 class PersistMessage(BaseModel):
@@ -99,11 +106,21 @@ async def _stream_and_persist(
     history: list[dict[str, str]],
     session_id: uuid.UUID | None,
     attachments: list[AttachmentInput] | None = None,
+    temperature: float = 0.2,
+    active_command: str | None = None,
+    prompt_mode: str = "auto",
 ) -> AsyncIterator[str]:
     assistant_parts: list[str] = []
     stream_failed = False
 
-    async for chunk in stream_agent_response(query, history, attachments):
+    async for chunk in stream_agent_response(
+        query,
+        history,
+        attachments,
+        temperature=temperature,
+        active_command=active_command,
+        prompt_mode=prompt_mode,
+    ):
         try:
             payload = json.loads(chunk.removeprefix("data: ").strip())
             if payload.get("type") == "token":
@@ -196,6 +213,9 @@ async def stream_chat(request: ChatRequest) -> StreamingResponse:
             history=history,
             session_id=request.session_id,
             attachments=attachments,
+            temperature=request.temperature,
+            active_command=request.active_command,
+            prompt_mode=request.prompt_mode,
         ),
         media_type="text/event-stream",
         headers={

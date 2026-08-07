@@ -10,9 +10,8 @@ import {
   LogIn,
   LogOut,
   MessageSquare,
-  Paperclip,
   Plus,
-  SendHorizontal,
+  Settings2,
   Trash2,
   User,
   X,
@@ -20,11 +19,11 @@ import {
 import { signIn, signOut, useSession } from "next-auth/react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   type ChangeEvent,
   type ClipboardEvent,
   type FormEvent,
-  type KeyboardEvent,
   useCallback,
   useEffect,
   useRef,
@@ -33,7 +32,18 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import {
+  isActiveChatCommand,
+  type ActiveChatCommand,
+} from "../lib/chat-commands";
+import { getChatCopy, useAppLanguage } from "../lib/i18n";
+import {
+  DEFAULT_PROMPT_MODE,
+  type PromptMode,
+} from "../lib/prompt-modes";
+import { loadSettings } from "../lib/settings-storage";
 import { ThemeToggle } from "../theme/theme-toggle";
+import { ChatInput } from "./ChatInput";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
@@ -70,6 +80,8 @@ type ChatMessage = {
   id: string;
   role: ChatRole;
   content: string;
+  command?: ActiveChatCommand | null;
+  promptMode?: PromptMode | null;
 };
 
 type ChatAttachmentPayload = {
@@ -78,6 +90,12 @@ type ChatAttachmentPayload = {
   content_base64: string;
   kind: "image";
 };
+
+const QUICK_TASK_ICONS = {
+  pdf: FileText,
+  excel: FileSpreadsheet,
+  vision: ImageIcon,
+} as const;
 
 function isImageFile(file: File): boolean {
   return (
@@ -94,7 +112,8 @@ function fileToBase64(file: File): Promise<string> {
       const base64 = result.includes(",") ? result.split(",", 2)[1] : result;
       resolve(base64);
     };
-    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("Failed to read file"));
     reader.readAsDataURL(file);
   });
 }
@@ -102,9 +121,11 @@ function fileToBase64(file: File): Promise<string> {
 function PendingFileChip({
   file,
   onRemove,
+  removeLabel,
 }: {
   file: File;
   onRemove: () => void;
+  removeLabel: string;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
@@ -131,7 +152,7 @@ function PendingFileChip({
       <button
         type="button"
         onClick={onRemove}
-        aria-label={`Xóa ${file.name}`}
+        aria-label={removeLabel}
         className="p-0.5 text-kennek-ash transition hover:text-kennek-orange"
       >
         <X className="h-3.5 w-3.5" strokeWidth={2.5} />
@@ -139,33 +160,6 @@ function PendingFileChip({
     </div>
   );
 }
-
-const QUICK_TASKS = [
-  {
-    id: "pdf",
-    title: "Phân tích PDF",
-    description: "Trích xuất & tóm tắt tài liệu kỹ thuật",
-    prompt:
-      "Hướng dẫn tôi phân tích một file PDF vừa upload: tóm tắt cấu trúc, điểm chính và các số liệu quan trọng.",
-    icon: FileText,
-  },
-  {
-    id: "excel",
-    title: "Lập bảng Excel",
-    description: "Chuyển dữ liệu thô thành bảng có cấu trúc",
-    prompt:
-      "Hãy giúp tôi lập bảng Excel từ dữ liệu mô tả. Đề xuất cột, công thức và cách trình bày rõ ràng.",
-    icon: FileSpreadsheet,
-  },
-  {
-    id: "vision",
-    title: "Mô tả Hình ảnh",
-    description: "OCR / đọc UI / phân tích screenshot",
-    prompt:
-      "Tôi sẽ dán ảnh (Ctrl+V). Hãy sẵn sàng phân tích hình ảnh: mô tả nội dung, đọc chữ trên ảnh và chỉ ra điểm cần chú ý.",
-    icon: ImageIcon,
-  },
-] as const;
 
 type ChatSessionSummary = {
   id: string;
@@ -179,11 +173,18 @@ type ServerEvent = {
   content: string;
 };
 
-function createMessage(role: ChatRole, content: string): ChatMessage {
+function createMessage(
+  role: ChatRole,
+  content: string,
+  command?: ActiveChatCommand | null,
+  promptMode?: PromptMode | null,
+): ChatMessage {
   return {
     id: crypto.randomUUID(),
     role,
     content,
+    command: command ?? null,
+    promptMode: promptMode ?? null,
   };
 }
 
@@ -254,6 +255,9 @@ function MarkdownMessage({ content }: { content: string }) {
 }
 
 export function Chat() {
+  const router = useRouter();
+  const language = useAppLanguage();
+  const t = getChatCopy(language);
   const { data: session, status: authStatus } = useSession();
   const userEmail = session?.user?.email ?? null;
 
@@ -261,6 +265,11 @@ export function Chat() {
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  const [activeCommand, setActiveCommand] = useState<ActiveChatCommand | null>(
+    null,
+  );
+  const [promptMode, setPromptMode] =
+    useState<PromptMode>(DEFAULT_PROMPT_MODE);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -459,7 +468,7 @@ export function Chat() {
     }
 
     setIsUploading(true);
-    setStatus("Đang nạp tài liệu vào kho tri thức...");
+    setStatus(t.uploadingDocs);
 
     try {
       const formData = new FormData();
@@ -485,10 +494,10 @@ export function Chat() {
         message: string;
       };
 
-      const summary =
-        `Đã tiếp nhận ${data.files.length} file: ${data.files.join(", ")}. ` +
-        `Nạp ${data.chunk_count} đoạn vào kho tri thức. ` +
-        "Bạn có thể hỏi về nội dung các file này.";
+      const summary = t.uploadSummary(
+        data.files.join(", "),
+        data.chunk_count,
+      );
 
       setMessages((current) => [
         ...current,
@@ -498,12 +507,10 @@ export function Chat() {
     } catch (error) {
       console.error("Unable to upload documents", error);
       const message =
-        error instanceof Error
-          ? error.message
-          : "Không thể upload tài liệu.";
+        error instanceof Error ? error.message : t.uploadFailed;
       setMessages((current) => [
         ...current,
-        createMessage("assistant", `**Lỗi upload:** ${message}`),
+        createMessage("assistant", `${t.uploadErrorPrefix} ${message}`),
       ]);
       return null;
     } finally {
@@ -576,6 +583,7 @@ export function Chat() {
   const submitMessage = async (
     event?: FormEvent,
     overrideText?: string,
+    overrideCommand?: ActiveChatCommand | null,
   ) => {
     event?.preventDefault();
 
@@ -583,6 +591,10 @@ export function Chat() {
     if ((!query && pendingFiles.length === 0) || isStreaming || isUploading) {
       return;
     }
+
+    const commandForTurn =
+      overrideCommand !== undefined ? overrideCommand : activeCommand;
+    const modeForTurn = promptMode;
 
     const imageFiles = pendingFiles.filter(isImageFile);
     const documentFiles = pendingFiles.filter((file) => !isImageFile(file));
@@ -601,7 +613,7 @@ export function Chat() {
     let attachments: ChatAttachmentPayload[] = [];
     if (imageFiles.length > 0) {
       try {
-        setStatus("Đang chuẩn bị ảnh...");
+        setStatus(t.preparingImage);
         attachments = await Promise.all(
           imageFiles.map(async (file) => ({
             filename: file.name,
@@ -614,10 +626,7 @@ export function Chat() {
         console.error("Unable to encode image attachments", error);
         setMessages((current) => [
           ...current,
-          createMessage(
-            "assistant",
-            "**Lỗi:** Không đọc được ảnh từ clipboard/file.",
-          ),
+          createMessage("assistant", t.imageReadError),
         ]);
         setStatus(null);
         return;
@@ -625,8 +634,7 @@ export function Chat() {
     }
 
     const messageText =
-      query ||
-      (attachments.length > 0 ? "Hãy phân tích ảnh đính kèm." : "");
+      query || (attachments.length > 0 ? t.analyzeAttachment : "");
 
     setPendingFiles([]);
 
@@ -634,8 +642,10 @@ export function Chat() {
     const userMessage = createMessage(
       "user",
       attachments.length > 0
-        ? `${messageText}\n\n[Đính kèm ${attachments.length} ảnh]`
+        ? `${messageText}\n\n${t.attachedImages(attachments.length)}`
         : messageText,
+      commandForTurn,
+      modeForTurn === "auto" ? null : modeForTurn,
     );
     const assistantMessage = createMessage("assistant", "");
     const controller = new AbortController();
@@ -644,6 +654,7 @@ export function Chat() {
 
     abortControllerRef.current = controller;
     setInput("");
+    setActiveCommand(null);
     setStatus(null);
     setIsStreaming(true);
     setMessages((current) => [...current, userMessage, assistantMessage]);
@@ -663,6 +674,9 @@ export function Chat() {
             content,
           })),
           attachments,
+          temperature: loadSettings().models.temperature,
+          active_command: commandForTurn,
+          prompt_mode: modeForTurn,
         }),
         signal: controller.signal,
         openWhenHidden: true,
@@ -681,7 +695,7 @@ export function Chat() {
           const streamEvent = JSON.parse(eventMessage.data) as ServerEvent;
 
           if (streamEvent.type === "status") {
-            setStatus(streamEvent.content || "Đang xử lý...");
+            setStatus(streamEvent.content || t.processing);
             return;
           }
 
@@ -694,7 +708,7 @@ export function Chat() {
 
           if (streamEvent.type === "error") {
             setStatus(null);
-            const errorText = `\n\n**Lỗi:** ${streamEvent.content}`;
+            const errorText = `${t.errorPrefix}${streamEvent.content}`;
             assistantContent += errorText;
             appendAssistantToken(assistantMessage.id, errorText);
           }
@@ -717,23 +731,13 @@ export function Chat() {
       if (!controller.signal.aborted) {
         console.error("Unable to stream chat response", error);
         setStatus(null);
-        appendAssistantToken(
-          assistantMessage.id,
-          "\n\n**Không thể kết nối tới máy chủ AI.** Hãy kiểm tra FastAPI tại `localhost:8000`.",
-        );
+        appendAssistantToken(assistantMessage.id, t.connectionError);
       }
     } finally {
       if (!controller.signal.aborted) {
         setIsStreaming(false);
         abortControllerRef.current = null;
       }
-    }
-  };
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      void submitMessage();
     }
   };
 
@@ -744,18 +748,22 @@ export function Chat() {
     setActiveSessionId(null);
     activeSessionIdRef.current = null;
     setInput("");
+    setActiveCommand(null);
     setPendingFiles([]);
     setStatus(null);
     setIsStreaming(false);
     setIsUploading(false);
   };
 
-  const runQuickTask = (prompt: string) => {
+  const runQuickTask = (prompt: string, command?: ActiveChatCommand) => {
     if (isStreaming || isUploading) {
       return;
     }
+    if (command) {
+      setActiveCommand(command);
+    }
     setInput(prompt);
-    void submitMessage(undefined, prompt);
+    void submitMessage(undefined, prompt, command ?? null);
   };
 
   return (
@@ -793,7 +801,7 @@ export function Chat() {
           >
             <span className="kennek-frame-inner flex w-full items-center gap-3 px-4 py-3 text-sm font-semibold text-kennek-mist transition group-hover:bg-kennek-steel/40 group-hover:text-kennek-ink">
               <Plus className="h-4 w-4 text-kennek-orange" strokeWidth={2.5} />
-              Cuộc trò chuyện mới
+              {t.newChat}
             </span>
           </button>
         </div>
@@ -802,24 +810,22 @@ export function Chat() {
           {authStatus === "loading" ? (
             <div className="flex items-center gap-2 px-3 py-4 text-sm text-kennek-ash">
               <LoaderCircle className="h-4 w-4 animate-spin text-kennek-orange" />
-              Đang tải...
+              {t.loading}
             </div>
           ) : !userEmail ? (
             <div className="space-y-3 px-1 py-2">
-              <p className="px-2 text-sm text-kennek-ash">
-                Đăng nhập để lưu và xem lịch sử hội thoại.
-              </p>
+              <p className="px-2 text-sm text-kennek-ash">{t.loginToSave}</p>
               <Link href="/auth/signin" className="kennek-frame block w-full">
                 <span className="kennek-frame-inner flex w-full items-center justify-center gap-2 bg-kennek-orange px-4 py-2.5 text-sm font-bold text-kennek-black transition hover:brightness-110">
                   <LogIn className="h-4 w-4" strokeWidth={2.5} />
-                  Đăng nhập
+                  {t.login}
                 </span>
               </Link>
             </div>
           ) : isLoadingHistory ? (
             <div className="flex items-center gap-2 px-3 py-4 text-sm text-kennek-ash">
               <LoaderCircle className="h-4 w-4 animate-spin text-kennek-orange" />
-              Đang tải...
+              {t.loading}
             </div>
           ) : sessions.length > 0 ? (
             <div className="space-y-1">
@@ -856,7 +862,7 @@ export function Chat() {
                         title: chatSession.title,
                       });
                     }}
-                    aria-label={`Xóa ${chatSession.title}`}
+                    aria-label={t.deleteSessionAria(chatSession.title)}
                     className="shrink-0 p-2 text-kennek-ash opacity-0 transition hover:text-kennek-orange group-hover:opacity-100 focus:opacity-100"
                   >
                     <Trash2 className="h-3.5 w-3.5" strokeWidth={2.4} />
@@ -866,12 +872,23 @@ export function Chat() {
             </div>
           ) : (
             <p className="px-3 py-4 font-mono text-xs text-kennek-ash">
-              // chưa có session
+              {t.noSessions}
             </p>
           )}
         </div>
 
-        <div className="border-t border-kennek-steel/80 p-3">
+        <div className="space-y-2 border-t border-kennek-steel/80 p-3">
+          <button
+            type="button"
+            onClick={() => router.push("/settings")}
+            className="kennek-frame w-full"
+          >
+            <span className="kennek-frame-inner flex w-full items-center gap-3 px-3 py-2.5 text-sm text-kennek-mist transition hover:text-kennek-orange">
+              <Settings2 className="h-4 w-4" strokeWidth={2.5} />
+              {t.settings}
+            </span>
+          </button>
+
           {userEmail ? (
             <div className="kennek-frame">
               <div className="kennek-frame-inner flex items-center gap-3 px-3 py-2.5">
@@ -898,7 +915,7 @@ export function Chat() {
                 <button
                   type="button"
                   onClick={() => void signOut({ callbackUrl: "/auth/signin" })}
-                  aria-label="Đăng xuất"
+                  aria-label={t.logout}
                   className="p-2 text-kennek-ash transition hover:text-kennek-orange"
                 >
                   <LogOut className="h-4 w-4" strokeWidth={2.5} />
@@ -913,7 +930,7 @@ export function Chat() {
             >
               <span className="kennek-frame-inner flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm text-kennek-mist transition hover:text-kennek-orange">
                 <LogIn className="h-4 w-4" strokeWidth={2.5} />
-                Đăng nhập
+                {t.login}
               </span>
             </button>
           )}
@@ -930,19 +947,29 @@ export function Chat() {
             </div>
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold tracking-wide text-kennek-ink">
-                Analytics Command Center
+                {t.headerTitle}
               </h1>
               <p className="flex items-center gap-2 font-mono text-[11px] text-kennek-ash">
                 <span className="inline-block h-1.5 w-1.5 bg-kennek-orange shadow-[0_0_8px_var(--kennek-orange)]" />
-                SYSTEM ONLINE
+                {t.systemOnline}
               </p>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <ThemeToggle />
+            <button
+              type="button"
+              onClick={() => router.push("/settings")}
+              aria-label={t.settings}
+              className="kennek-frame md:hidden"
+            >
+              <span className="kennek-frame-inner flex h-9 w-9 items-center justify-center text-kennek-mist">
+                <Settings2 className="h-4 w-4" strokeWidth={2.5} />
+              </span>
+            </button>
             <Link href="/auth/signin" className="kennek-frame md:hidden">
               <span className="kennek-frame-inner px-3 py-1.5 text-xs text-kennek-mist">
-                Đăng nhập
+                {t.login}
               </span>
             </Link>
           </div>
@@ -955,22 +982,29 @@ export function Chat() {
                 <div className="mb-8 flex flex-col items-center text-center">
                   <p className="kennek-label mb-3">Kennek AI</p>
                   <h2 className="vi-safe px-2 text-2xl font-semibold tracking-normal text-kennek-ink sm:text-3xl">
-                    Bạn muốn bắt đầu từ đâu?
+                    {t.splashTitle}
                   </h2>
                   <p className="mt-3 max-w-lg text-sm leading-6 text-kennek-mist">
-                    Chọn tác vụ nhanh bên dưới, hoặc nhập lệnh / dán ảnh
-                    (Ctrl+V) để bắt đầu.
+                    {t.splashSubtitle}
                   </p>
                 </div>
 
                 <div className="grid w-full max-w-3xl gap-3 sm:grid-cols-3">
-                  {QUICK_TASKS.map((task) => {
-                    const Icon = task.icon;
+                  {t.quickTasks.map((task) => {
+                    const Icon =
+                      QUICK_TASK_ICONS[
+                        task.id as keyof typeof QUICK_TASK_ICONS
+                      ];
                     return (
                       <button
                         key={task.id}
                         type="button"
-                        onClick={() => runQuickTask(task.prompt)}
+                        onClick={() =>
+                          runQuickTask(
+                            task.prompt,
+                            isActiveChatCommand(task.id) ? task.id : undefined,
+                          )
+                        }
                         disabled={isStreaming || isUploading}
                         className="group kennek-frame text-left disabled:opacity-50"
                       >
@@ -988,7 +1022,7 @@ export function Chat() {
                             {task.description}
                           </span>
                           <span className="mt-4 block font-mono text-[10px] uppercase tracking-[0.18em] text-kennek-orange/80">
-                            Execute →
+                            {t.execute}
                           </span>
                         </span>
                       </button>
@@ -1012,12 +1046,30 @@ export function Chat() {
 
                   {message.content && (
                     <div
-                      className={`max-w-[85%] text-sm sm:max-w-[75%] ${
+                      className={`relative max-w-[85%] text-sm sm:max-w-[75%] ${
                         message.role === "user"
                           ? "clip-chamfer bg-kennek-orange px-4 py-3 text-kennek-black"
                           : "kennek-frame"
                       }`}
                     >
+                      {message.role === "user" &&
+                      (message.command ||
+                        (message.promptMode &&
+                          message.promptMode !== "auto")) ? (
+                        <div className="mb-2 flex flex-wrap gap-1.5">
+                          {message.command ? (
+                            <span className="inline-flex items-center clip-chamfer-sm bg-kennek-black/90 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#FF5500] ring-1 ring-[#FF5500]/50">
+                              MODE: @{message.command}
+                            </span>
+                          ) : null}
+                          {message.promptMode &&
+                          message.promptMode !== "auto" ? (
+                            <span className="inline-flex items-center clip-chamfer-sm bg-kennek-black/90 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#FF5500] ring-1 ring-[#FF5500]/50">
+                              {message.promptMode}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
                       {message.role === "user" ? (
                         <p className="whitespace-pre-wrap font-medium leading-6">
                           {message.content}
@@ -1056,65 +1108,36 @@ export function Chat() {
                 <PendingFileChip
                   key={`${file.name}-${file.lastModified}-${index}`}
                   file={file}
+                  removeLabel={t.removeFile(file.name)}
                   onRemove={() => removePendingFile(index)}
                 />
               ))}
             </div>
           )}
 
-          <form
-            onSubmit={submitMessage}
-            className="kennek-frame mx-auto max-w-4xl kennek-frame-active focus-within:brightness-110"
-          >
-            <div className="kennek-frame-inner flex items-end gap-2 bg-kennek-panel p-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept={ACCEPTED_FILE_TYPES}
-                className="hidden"
-                onChange={handleFileSelection}
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isStreaming || isUploading}
-                aria-label="Đính kèm tài liệu"
-                className="clip-chamfer-sm flex h-11 w-11 shrink-0 items-center justify-center bg-kennek-black text-kennek-mist ring-1 ring-kennek-steel transition hover:text-kennek-orange hover:ring-kennek-orange/50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Paperclip className="h-5 w-5" strokeWidth={2.4} />
-              </button>
-              <textarea
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
-                rows={1}
-                placeholder="Nhập lệnh phân tích · Ctrl+V dán ảnh · đính kèm file..."
-                disabled={isStreaming || isUploading}
-                className="max-h-36 min-h-11 flex-1 resize-none bg-transparent px-3 py-3 text-sm leading-5 text-kennek-ink outline-none placeholder:text-kennek-ash disabled:cursor-not-allowed"
-              />
-              <button
-                type="submit"
-                disabled={
-                  (!input.trim() && pendingFiles.length === 0) ||
-                  isStreaming ||
-                  isUploading
-                }
-                aria-label="Gửi tin nhắn"
-                className="clip-chamfer-sm flex h-11 w-11 shrink-0 items-center justify-center bg-kennek-orange text-kennek-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-kennek-steel disabled:text-kennek-ash"
-              >
-                {isStreaming || isUploading ? (
-                  <LoaderCircle className="h-5 w-5 animate-spin" strokeWidth={2.5} />
-                ) : (
-                  <SendHorizontal className="h-5 w-5" strokeWidth={2.5} />
-                )}
-              </button>
-            </div>
-          </form>
-          <p className="mx-auto mt-2 max-w-4xl text-center font-mono text-[10px] uppercase tracking-[0.16em] text-kennek-ash">
-            Enter gửi · Ctrl+V ảnh · PDF / DOCX / Excel / Vision
-          </p>
+          <ChatInput
+            value={input}
+            onChange={setInput}
+            activeCommand={activeCommand}
+            onActiveCommandChange={setActiveCommand}
+            promptMode={promptMode}
+            onPromptModeChange={setPromptMode}
+            onClearConversation={startNewChat}
+            onSubmit={() => void submitMessage()}
+            onPaste={handlePaste}
+            onAttachClick={() => fileInputRef.current?.click()}
+            fileInputRef={fileInputRef}
+            accept={ACCEPTED_FILE_TYPES}
+            onFileChange={handleFileSelection}
+            disabled={isStreaming || isUploading}
+            isBusy={isStreaming || isUploading}
+            canSubmit={Boolean(input.trim() || pendingFiles.length > 0)}
+            placeholder={t.inputPlaceholder}
+            attachLabel={t.attach}
+            sendLabel={t.send}
+            hint={`${t.inputHint} · @ commands`}
+            language={language}
+          />
         </div>
       </main>
 
@@ -1136,19 +1159,19 @@ export function Chat() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="kennek-frame-inner bg-kennek-panel p-6">
-              <p className="kennek-label mb-3">Confirm Delete</p>
+              <p className="kennek-label mb-3">{t.confirmDeleteTitle}</p>
               <h2
                 id="delete-session-title"
                 className="text-lg font-semibold text-kennek-ink"
               >
-                Bạn có chắc chắn muốn xoá?
+                {t.deleteSessionTitle}
               </h2>
               <p className="mt-2 text-sm leading-6 text-kennek-mist">
-                Cuộc trò chuyện{" "}
+                {t.deleteSessionBodyPrefix}{" "}
                 <span className="font-medium text-kennek-orange">
                   “{sessionToDelete.title}”
                 </span>{" "}
-                sẽ bị xoá vĩnh viễn và không thể khôi phục.
+                {t.deleteSessionBodySuffix}
               </p>
 
               <div className="mt-6 flex items-center justify-end gap-2">
@@ -1159,7 +1182,7 @@ export function Chat() {
                   className="kennek-frame"
                 >
                   <span className="kennek-frame-inner px-4 py-2.5 text-sm text-kennek-mist transition hover:text-kennek-ink">
-                    Huỷ
+                    {t.cancel}
                   </span>
                 </button>
                 <button
@@ -1174,7 +1197,7 @@ export function Chat() {
                     ) : (
                       <Trash2 className="h-4 w-4" strokeWidth={2.5} />
                     )}
-                    Xác nhận xoá
+                    {t.confirmDelete}
                   </span>
                 </button>
               </div>
