@@ -349,10 +349,68 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-[#0B0F17] text-foreground [.light_&]:bg-kennek-charcoal">
+    <div className="flex h-dvh flex-col overflow-hidden bg-[#0B0F17] text-foreground lg:flex-row [.light_&]:bg-kennek-charcoal">
       <div className="pointer-events-none absolute inset-0 kennek-grid opacity-30" />
 
-      <aside className="relative z-10 flex w-64 shrink-0 flex-col border-r border-kennek-steel/70 bg-kennek-black">
+      {/* Mobile / tablet horizontal tabs */}
+      <div className="relative z-10 border-b border-kennek-steel/70 bg-kennek-black lg:hidden">
+        <div className="flex h-14 items-center justify-between gap-2 px-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="clip-chamfer-sm relative h-8 w-8 overflow-hidden bg-kennek-black">
+              <Image
+                src="/logo_Kennek.png"
+                alt="Kennek"
+                fill
+                sizes="32px"
+                className="object-cover"
+                priority
+              />
+            </div>
+            <p className="truncate text-sm font-semibold text-kennek-ink">
+              Settings
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <Link href="/" className="kennek-frame">
+              <span className="kennek-frame-inner flex h-9 items-center gap-1.5 px-2.5 text-xs text-kennek-mist">
+                <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2.5} />
+                <span className="hidden xs:inline sm:inline">{copy.back}</span>
+              </span>
+            </Link>
+          </div>
+        </div>
+        <nav className="flex gap-1 overflow-x-auto px-3 pb-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {TABS.map(({ id, labelVi, labelEn, icon: Icon }) => {
+            const active = tab === id;
+            const label =
+              settings.system.language === "vi" ? labelVi : labelEn;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setTab(id)}
+                className={`flex shrink-0 items-center gap-2 clip-chamfer px-3 py-2 text-left text-xs transition sm:text-sm ${
+                  active
+                    ? "bg-kennek-orange/15 text-kennek-ink ring-1 ring-inset ring-[#FF5500]"
+                    : "text-kennek-mist ring-1 ring-inset ring-kennek-steel hover:text-kennek-ink"
+                }`}
+              >
+                <Icon
+                  className={`h-3.5 w-3.5 shrink-0 ${
+                    active ? "text-[#FF5500]" : "text-kennek-ash"
+                  }`}
+                  strokeWidth={2.4}
+                />
+                <span className="whitespace-nowrap">{label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* Desktop sidebar */}
+      <aside className="relative z-10 hidden w-64 shrink-0 flex-col border-r border-kennek-steel/70 bg-kennek-black lg:flex">
         <div className="kennek-rail absolute inset-y-0 right-0 w-[3px]" aria-hidden />
 
         <div className="flex h-16 items-center gap-3 border-b border-kennek-steel/80 px-4">
@@ -411,7 +469,7 @@ export default function SettingsPage() {
       </aside>
 
       <main className="relative z-10 flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-kennek-steel/70 bg-[#0B0F17]/90 px-5 backdrop-blur [.light_&]:bg-kennek-charcoal/90">
+        <header className="hidden h-16 shrink-0 items-center justify-between gap-3 border-b border-kennek-steel/70 bg-[#0B0F17]/90 px-5 backdrop-blur lg:flex [.light_&]:bg-kennek-charcoal/90">
           <div className="flex min-w-0 items-center gap-3">
             <div className="clip-chamfer-sm flex h-9 w-9 items-center justify-center bg-kennek-panel ring-1 ring-kennek-orange/40">
               <Settings2 className="h-4 w-4 text-kennek-orange" strokeWidth={2.5} />
@@ -427,7 +485,7 @@ export default function SettingsPage() {
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
-            <Link href="/" className="kennek-frame hidden sm:block">
+            <Link href="/" className="kennek-frame">
               <span className="kennek-frame-inner bg-kennek-orange px-3 py-2 text-xs font-bold text-kennek-black">
                 {copy.back}
               </span>
@@ -435,7 +493,7 @@ export default function SettingsPage() {
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-6">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
             {tab === "models" && (
               <SettingsCard

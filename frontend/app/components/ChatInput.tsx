@@ -402,7 +402,7 @@ export function ChatInput({
             role="listbox"
             aria-label="Command suggestions"
           >
-            <div className="max-h-64 overflow-y-auto py-1">
+            <div className="max-h-[200px] overflow-y-auto py-1 sm:max-h-64">
               {filtered.map((command, index) => {
                 const Icon = command.icon;
                 const active = index === highlightIndex;
@@ -496,9 +496,9 @@ export function ChatInput({
                 onClick={onAttachClick}
                 disabled={disabled}
                 aria-label={attachLabel}
-                className="clip-chamfer-sm flex h-11 w-11 shrink-0 items-center justify-center bg-kennek-black text-kennek-mist ring-1 ring-kennek-steel transition hover:text-kennek-orange hover:ring-kennek-orange/50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="clip-chamfer-sm flex h-9 w-9 shrink-0 items-center justify-center bg-kennek-black text-kennek-mist ring-1 ring-kennek-steel transition hover:text-kennek-orange hover:ring-kennek-orange/50 disabled:cursor-not-allowed disabled:opacity-50 sm:h-11 sm:w-11"
               >
-                <Paperclip className="h-5 w-5" strokeWidth={2.4} />
+                <Paperclip className="h-4 w-4 sm:h-5 sm:w-5" strokeWidth={2.4} />
               </button>
               <textarea
                 ref={textareaRef}
@@ -517,21 +517,21 @@ export function ChatInput({
                 rows={1}
                 placeholder={placeholder}
                 disabled={disabled}
-                className="max-h-36 min-h-11 flex-1 resize-none bg-transparent px-3 py-3 text-sm leading-5 text-kennek-ink outline-none placeholder:text-kennek-ash disabled:cursor-not-allowed"
+                className="max-h-36 min-h-9 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-5 text-kennek-ink outline-none placeholder:text-kennek-ash disabled:cursor-not-allowed sm:min-h-11 sm:px-3 sm:py-3"
               />
               <button
                 type="submit"
                 disabled={!canSubmit || disabled}
                 aria-label={sendLabel}
-                className="clip-chamfer-sm flex h-11 w-11 shrink-0 items-center justify-center bg-kennek-orange text-kennek-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-kennek-steel disabled:text-kennek-ash"
+                className="clip-chamfer-sm flex h-9 w-9 shrink-0 items-center justify-center bg-kennek-orange text-kennek-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-kennek-steel disabled:text-kennek-ash sm:h-11 sm:w-11"
               >
                 {isBusy ? (
                   <LoaderCircle
-                    className="h-5 w-5 animate-spin"
+                    className="h-4 w-4 animate-spin sm:h-5 sm:w-5"
                     strokeWidth={2.5}
                   />
                 ) : (
-                  <SendHorizontal className="h-5 w-5" strokeWidth={2.5} />
+                  <SendHorizontal className="h-4 w-4 sm:h-5 sm:w-5" strokeWidth={2.5} />
                 )}
               </button>
             </div>
@@ -558,7 +558,7 @@ export function ChatInput({
       </div>
       {menu}
       {modeMenu}
-      <p className="mt-2 text-center font-mono text-[10px] uppercase tracking-[0.16em] text-kennek-ash">
+      <p className="mt-1.5 hidden text-center font-mono text-[10px] uppercase tracking-[0.16em] text-kennek-ash sm:mt-2 sm:block">
         {hint}
       </p>
     </div>

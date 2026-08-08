@@ -7,18 +7,13 @@ import {
   FileText,
   ImageIcon,
   LoaderCircle,
-  LogIn,
-  LogOut,
-  MessageSquare,
-  Plus,
+  Menu,
   Settings2,
   Trash2,
   User,
   X,
 } from "lucide-react";
-import { signIn, signOut, useSession } from "next-auth/react";
-import Image from "next/image";
-import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import {
   type ChangeEvent,
@@ -44,6 +39,7 @@ import {
 import { loadSettings } from "../lib/settings-storage";
 import { ThemeToggle } from "../theme/theme-toggle";
 import { ChatInput } from "./ChatInput";
+import { ChatSidebar } from "./Sidebar";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
@@ -317,6 +313,7 @@ export function Chat() {
     title: string;
   } | null>(null);
   const [isDeletingSession, setIsDeletingSession] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -805,188 +802,58 @@ export function Chat() {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-kennek-charcoal text-foreground">
-      {/* Sidebar — industrial rail + charcoal panels */}
-      <aside className="relative hidden w-72 shrink-0 flex-col bg-kennek-black md:flex">
-        <div className="kennek-rail absolute inset-y-0 right-0 w-[3px]" aria-hidden />
-        <div
-          className="pointer-events-none absolute inset-y-0 right-[5px] w-px bg-kennek-orange/35"
-          aria-hidden
-        />
-
-        <div className="flex h-16 items-center gap-3 border-b border-kennek-steel/80 px-5">
-          <div className="clip-chamfer-sm relative h-9 w-9 overflow-hidden bg-kennek-black">
-            <Image
-              src="/logo_Kennek.png"
-              alt="Kennek"
-              fill
-              sizes="36px"
-              className="object-cover"
-              priority
-            />
-          </div>
-          <div>
-            <p className="font-semibold tracking-wide text-kennek-ink">Kennek AI</p>
-            <p className="kennek-label mt-0.5">Command Center</p>
-          </div>
-        </div>
-
-        <div className="p-3">
-          <button
-            type="button"
-            onClick={startNewChat}
-            className="group kennek-frame w-full kennek-frame-active"
-          >
-            <span className="kennek-frame-inner flex w-full items-center gap-3 px-4 py-3 text-sm font-semibold text-kennek-mist transition group-hover:bg-kennek-steel/40 group-hover:text-kennek-ink">
-              <Plus className="h-4 w-4 text-kennek-orange" strokeWidth={2.5} />
-              {t.newChat}
-            </span>
-          </button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-          {authStatus === "loading" ? (
-            <div className="flex items-center gap-2 px-3 py-4 text-sm text-kennek-ash">
-              <LoaderCircle className="h-4 w-4 animate-spin text-kennek-orange" />
-              {t.loading}
-            </div>
-          ) : !userEmail ? (
-            <div className="space-y-3 px-1 py-2">
-              <p className="px-2 text-sm text-kennek-ash">{t.loginToSave}</p>
-              <Link href="/auth/signin" className="kennek-frame block w-full">
-                <span className="kennek-frame-inner flex w-full items-center justify-center gap-2 bg-kennek-orange px-4 py-2.5 text-sm font-bold text-kennek-black transition hover:brightness-110">
-                  <LogIn className="h-4 w-4" strokeWidth={2.5} />
-                  {t.login}
-                </span>
-              </Link>
-            </div>
-          ) : isLoadingHistory ? (
-            <div className="flex items-center gap-2 px-3 py-4 text-sm text-kennek-ash">
-              <LoaderCircle className="h-4 w-4 animate-spin text-kennek-orange" />
-              {t.loading}
-            </div>
-          ) : sessions.length > 0 ? (
-            <div className="space-y-1">
-              {sessions.map((chatSession) => (
-                <div
-                  key={chatSession.id}
-                  className={`group flex w-full items-center gap-1 clip-chamfer-sm pr-1 text-sm transition ${
-                    activeSessionId === chatSession.id
-                      ? "bg-kennek-orange/15 text-kennek-ink ring-1 ring-inset ring-kennek-orange/50"
-                      : "text-kennek-mist hover:bg-kennek-panel hover:text-kennek-ink"
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => void loadSession(chatSession.id)}
-                    className="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left"
-                  >
-                    <MessageSquare
-                      className={`h-4 w-4 shrink-0 ${
-                        activeSessionId === chatSession.id
-                          ? "text-kennek-orange"
-                          : "text-kennek-ash"
-                      }`}
-                      strokeWidth={2.25}
-                    />
-                    <span className="truncate">{chatSession.title}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setSessionToDelete({
-                        id: chatSession.id,
-                        title: chatSession.title,
-                      });
-                    }}
-                    aria-label={t.deleteSessionAria(chatSession.title)}
-                    className="shrink-0 p-2 text-kennek-ash opacity-0 transition hover:text-kennek-orange group-hover:opacity-100 focus:opacity-100"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" strokeWidth={2.4} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="px-3 py-4 font-mono text-xs text-kennek-ash">
-              {t.noSessions}
-            </p>
-          )}
-        </div>
-
-        <div className="space-y-2 border-t border-kennek-steel/80 p-3">
-          <button
-            type="button"
-            onClick={() => router.push("/settings")}
-            className="kennek-frame w-full"
-          >
-            <span className="kennek-frame-inner flex w-full items-center gap-3 px-3 py-2.5 text-sm text-kennek-mist transition hover:text-kennek-orange">
-              <Settings2 className="h-4 w-4" strokeWidth={2.5} />
-              {t.settings}
-            </span>
-          </button>
-
-          {userEmail ? (
-            <div className="kennek-frame">
-              <div className="kennek-frame-inner flex items-center gap-3 px-3 py-2.5">
-                <div className="clip-chamfer-avatar relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden bg-kennek-steel">
-                  {session?.user?.image ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={session.user.image}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <User className="h-4 w-4 text-kennek-orange" strokeWidth={2.5} />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-kennek-ink">
-                    {session?.user?.name ?? "Operator"}
-                  </p>
-                  <p className="truncate font-mono text-[10px] text-kennek-ash">
-                    {userEmail}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void signOut({ callbackUrl: "/auth/signin" })}
-                  aria-label={t.logout}
-                  className="p-2 text-kennek-ash transition hover:text-kennek-orange"
-                >
-                  <LogOut className="h-4 w-4" strokeWidth={2.5} />
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void signIn(undefined, { callbackUrl: "/" })}
-              className="kennek-frame w-full"
-            >
-              <span className="kennek-frame-inner flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm text-kennek-mist transition hover:text-kennek-orange">
-                <LogIn className="h-4 w-4" strokeWidth={2.5} />
-                {t.login}
-              </span>
-            </button>
-          )}
-        </div>
-      </aside>
+      <ChatSidebar
+        open={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
+        authStatus={authStatus}
+        userEmail={userEmail}
+        userName={session?.user?.name ?? null}
+        userImage={session?.user?.image ?? null}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        isLoadingHistory={isLoadingHistory}
+        labels={{
+          newChat: t.newChat,
+          loading: t.loading,
+          loginToSave: t.loginToSave,
+          login: t.login,
+          logout: t.logout,
+          noSessions: t.noSessions,
+          settings: t.settings,
+          deleteSessionAria: t.deleteSessionAria,
+        }}
+        onNewChat={startNewChat}
+        onOpenSettings={() => router.push("/settings")}
+        onLoadSession={(id) => void loadSession(id)}
+        onRequestDeleteSession={(chatSession) =>
+          setSessionToDelete({
+            id: chatSession.id,
+            title: chatSession.title,
+          })
+        }
+      />
 
       <main className="relative flex min-w-0 flex-1 flex-col bg-kennek-charcoal">
         <div className="pointer-events-none absolute inset-0 kennek-grid opacity-40" />
 
-        <header className="relative z-10 flex h-16 shrink-0 items-center justify-between gap-3 border-b border-kennek-steel/70 bg-kennek-charcoal/90 px-5 backdrop-blur">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="clip-chamfer-sm flex h-9 w-9 items-center justify-center bg-kennek-panel ring-1 ring-kennek-orange/40">
+        <header className="relative z-10 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-kennek-steel/70 bg-[#0B0F17]/95 px-3 backdrop-blur sm:px-5 md:h-16 [.light_&]:bg-kennek-charcoal/95">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen(true)}
+              aria-label="Open menu"
+              className="clip-chamfer-sm flex h-9 w-9 items-center justify-center bg-kennek-panel text-kennek-orange ring-1 ring-kennek-orange/40 md:hidden"
+            >
+              <Menu className="h-5 w-5" strokeWidth={2.5} />
+            </button>
+            <div className="clip-chamfer-sm hidden h-9 w-9 items-center justify-center bg-kennek-panel ring-1 ring-kennek-orange/40 sm:flex">
               <Bot className="h-4 w-4 text-kennek-orange" strokeWidth={2.5} />
             </div>
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold tracking-wide text-kennek-ink">
                 {t.headerTitle}
               </h1>
-              <p className="flex items-center gap-2 font-mono text-[11px] text-kennek-ash">
+              <p className="hidden items-center gap-2 font-mono text-[11px] text-kennek-ash sm:flex">
                 <span className="inline-block h-1.5 w-1.5 bg-kennek-orange shadow-[0_0_8px_var(--kennek-orange)]" />
                 {t.systemOnline}
               </p>
@@ -998,35 +865,30 @@ export function Chat() {
               type="button"
               onClick={() => router.push("/settings")}
               aria-label={t.settings}
-              className="kennek-frame md:hidden"
+              className="kennek-frame lg:hidden"
             >
               <span className="kennek-frame-inner flex h-9 w-9 items-center justify-center text-kennek-mist">
                 <Settings2 className="h-4 w-4" strokeWidth={2.5} />
               </span>
             </button>
-            <Link href="/auth/signin" className="kennek-frame md:hidden">
-              <span className="kennek-frame-inner px-3 py-1.5 text-xs text-kennek-mist">
-                {t.login}
-              </span>
-            </Link>
           </div>
         </header>
 
-        <div className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 pb-44 pt-6 sm:px-6">
-          <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+        <div className="relative z-10 min-h-0 flex-1 overflow-y-auto px-3 pb-36 pt-4 sm:px-6 sm:pb-44 sm:pt-6">
+          <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 sm:gap-6">
             {messages.length === 0 ? (
-              <div className="flex min-h-[58vh] flex-col items-center justify-center">
-                <div className="mb-8 flex flex-col items-center text-center">
-                  <p className="kennek-label mb-3">Kennek AI</p>
-                  <h2 className="vi-safe px-2 text-2xl font-semibold tracking-normal text-kennek-ink sm:text-3xl">
+              <div className="flex min-h-[52vh] flex-col items-center justify-center sm:min-h-[58vh]">
+                <div className="mb-6 flex flex-col items-center text-center sm:mb-8">
+                  <p className="kennek-label mb-2 sm:mb-3">Kennek AI</p>
+                  <h2 className="vi-safe px-2 text-2xl font-bold tracking-normal text-kennek-ink sm:text-3xl lg:text-4xl lg:font-extrabold">
                     {t.splashTitle}
                   </h2>
-                  <p className="mt-3 max-w-lg text-sm leading-6 text-kennek-mist">
+                  <p className="mt-2 max-w-lg px-2 text-sm leading-6 text-kennek-mist sm:mt-3">
                     {t.splashSubtitle}
                   </p>
                 </div>
 
-                <div className="grid w-full max-w-3xl gap-3 sm:grid-cols-3">
+                <div className="grid w-full max-w-4xl grid-cols-1 gap-3 px-1 sm:px-0 md:grid-cols-2 lg:grid-cols-3">
                   {t.quickTasks.map((task) => {
                     const Icon =
                       QUICK_TASK_ICONS[
@@ -1045,10 +907,10 @@ export function Chat() {
                         disabled={isStreaming || isUploading}
                         className="group kennek-frame text-left disabled:opacity-50"
                       >
-                        <span className="kennek-frame-inner block h-full bg-kennek-panel p-4 transition group-hover:bg-kennek-steel/30">
-                          <span className="mb-4 flex h-10 w-10 items-center justify-center clip-chamfer-sm bg-kennek-black ring-1 ring-kennek-orange/40">
+                        <span className="kennek-frame-inner block h-full bg-kennek-panel p-3 transition group-hover:bg-kennek-steel/30 sm:p-4">
+                          <span className="mb-3 flex h-9 w-9 items-center justify-center clip-chamfer-sm bg-kennek-black ring-1 ring-kennek-orange/40 sm:mb-4 sm:h-10 sm:w-10">
                             <Icon
-                              className="h-5 w-5 text-kennek-orange"
+                              className="h-4 w-4 text-kennek-orange sm:h-5 sm:w-5"
                               strokeWidth={2.4}
                             />
                           </span>
@@ -1058,7 +920,7 @@ export function Chat() {
                           <span className="mt-1.5 block text-xs leading-5 text-kennek-ash">
                             {task.description}
                           </span>
-                          <span className="mt-4 block font-mono text-[10px] uppercase tracking-[0.18em] text-kennek-orange/80">
+                          <span className="mt-3 block font-mono text-[10px] uppercase tracking-[0.18em] text-kennek-orange/80 sm:mt-4">
                             {t.execute}
                           </span>
                         </span>
@@ -1083,9 +945,9 @@ export function Chat() {
 
                   {message.content && (
                     <div
-                      className={`relative max-w-[85%] text-sm sm:max-w-[75%] ${
+                      className={`relative max-w-[92%] text-sm sm:max-w-[85%] md:max-w-[75%] ${
                         message.role === "user"
-                          ? "clip-chamfer bg-kennek-orange px-4 py-3 text-kennek-black"
+                          ? "clip-chamfer bg-kennek-orange px-3 py-2.5 text-kennek-black sm:px-4 sm:py-3"
                           : "kennek-frame"
                       }`}
                     >
@@ -1138,7 +1000,7 @@ export function Chat() {
           </div>
         </div>
 
-        <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-kennek-charcoal via-kennek-charcoal to-transparent px-4 pb-5 pt-12 sm:px-6">
+        <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-kennek-charcoal via-kennek-charcoal/95 to-transparent px-3 pt-8 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-5 sm:pt-12">
           {pendingFiles.length > 0 && (
             <div className="mx-auto mb-3 flex max-w-4xl flex-wrap gap-2">
               {pendingFiles.map((file, index) => (
