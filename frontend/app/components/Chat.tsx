@@ -32,6 +32,7 @@ import {
   type ActiveChatCommand,
 } from "../lib/chat-commands";
 import { getChatCopy, useAppLanguage } from "../lib/i18n";
+import { createId } from "../lib/id";
 import {
   DEFAULT_PROMPT_MODE,
   type PromptMode,
@@ -176,7 +177,7 @@ function createMessage(
   promptMode?: PromptMode | null,
 ): ChatMessage {
   return {
-    id: crypto.randomUUID(),
+    id: createId(),
     role,
     content,
     command: command ?? null,
