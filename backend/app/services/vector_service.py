@@ -10,7 +10,9 @@ from docx import Document as DocxDocument
 from llama_index.core import Document
 from pypdf import PdfReader
 
-CHROMA_PATH = Path("./chroma_db")
+from app.core.config import get_settings
+
+CHROMA_PATH = Path(get_settings().chroma_path)
 COLLECTION_NAME = "user_knowledge"
 
 SUPPORTED_EXTENSIONS = {

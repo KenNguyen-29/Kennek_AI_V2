@@ -28,6 +28,14 @@ class Settings(BaseSettings):
         default=3600,
         validation_alias="CHAT_PURGE_INTERVAL_SECONDS",
     )
+    chroma_path: str = Field(
+        default="./chroma_db",
+        validation_alias="CHROMA_PATH",
+    )
+    cors_origins: str = Field(
+        default="http://localhost:3000,http://127.0.0.1:3000",
+        validation_alias="CORS_ORIGINS",
+    )
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_DIR / ".env",
