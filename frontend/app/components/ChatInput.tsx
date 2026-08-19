@@ -76,7 +76,7 @@ function getAtToken(
   caret: number,
 ): { start: number; query: string } | null {
   const before = value.slice(0, caret);
-  const match = before.match(/(^|[\s\n])@([\w-]*)$/u);
+  const match = before.match(/(^|[\s\n])@([\w-]*)$/);
   if (!match) {
     return null;
   }
