@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     tavily_api_key: str = Field(validation_alias="TAVILY_API_KEY")
     # Default / fallback chat model (text path). Router may override per request.
     model_name: str = Field(
-        default="llama-3.3-70b-versatile",
+        default="openai/gpt-oss-120b",
         validation_alias="MODEL_NAME",
     )
     enable_content_moderation: bool = Field(
