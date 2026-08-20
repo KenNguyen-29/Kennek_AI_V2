@@ -19,6 +19,10 @@
   --kennek-ash: #6b737c;
   --kennek-ink: #f3f5f7;
 
+  /* Fixed contrast — do not flip in light mode */
+  --kennek-on-accent: #050607;
+  --kennek-on-light-surface: #12151a;
+
   --background: var(--kennek-charcoal);
   --foreground: var(--kennek-ink);
   color-scheme: dark;
@@ -37,6 +41,9 @@ html.light {
   --kennek-mist: #5a636e;
   --kennek-ash: #7a8490;
   --kennek-ink: #12151a;
+
+  --kennek-on-accent: #050607;
+  --kennek-on-light-surface: #12151a;
 
   --background: var(--kennek-charcoal);
   --foreground: var(--kennek-ink);

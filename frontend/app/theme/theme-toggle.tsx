@@ -26,7 +26,7 @@ export function ThemeToggle() {
         <span
           className={`absolute top-1 flex h-7 w-7 items-center justify-center clip-chamfer-avatar shadow-sm transition-all duration-200 ${
             isLight
-              ? "left-[calc(100%-1.95rem)] bg-kennek-orange text-kennek-black"
+              ? "left-[calc(100%-1.95rem)] bg-kennek-orange text-kennek-on-accent"
               : "left-1 bg-kennek-steel text-kennek-mist"
           }`}
         >

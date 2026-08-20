@@ -33,6 +33,7 @@ import {
 } from "../lib/chat-commands";
 import { getChatCopy, useAppLanguage } from "../lib/i18n";
 import { createId } from "../lib/id";
+import { resolveNotifyMessage, type NotifyInput } from "../lib/notify-errors";
 import {
   DEFAULT_PROMPT_MODE,
   type PromptMode,
@@ -41,6 +42,7 @@ import { loadSettings } from "../lib/settings-storage";
 import { ThemeToggle } from "../theme/theme-toggle";
 import { ChatInput } from "./ChatInput";
 import { ChatSidebar } from "./Sidebar";
+import { useToast } from "./ToastProvider";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
@@ -166,8 +168,9 @@ type ChatSessionSummary = {
 };
 
 type ServerEvent = {
-  type: "token" | "status" | "error";
+  type: "token" | "status" | "error" | "notice";
   content: string;
+  code?: string;
 };
 
 function createMessage(
@@ -292,8 +295,18 @@ export function Chat() {
   const router = useRouter();
   const language = useAppLanguage();
   const t = getChatCopy(language);
+  const { showToast } = useToast();
   const { data: session, status: authStatus } = useSession();
   const userEmail = session?.user?.email ?? null;
+
+  const notify = useCallback(
+    (input: NotifyInput) => {
+      const resolved = resolveNotifyMessage(input, language);
+      showToast({ type: resolved.severity, message: resolved.message });
+      return resolved.message;
+    },
+    [language, showToast],
+  );
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
@@ -350,10 +363,11 @@ export function Chat() {
       setSessions(data);
     } catch (error) {
       console.error("Unable to load chat history", error);
+      notify({ code: "chat_history_load" });
     } finally {
       setIsLoadingHistory(false);
     }
-  }, []);
+  }, [notify]);
 
   useEffect(() => {
     if (!userEmail) {
@@ -411,6 +425,7 @@ export function Chat() {
       await fetchHistory(userEmail);
     } catch (error) {
       console.error("Unable to persist chat history", error);
+      notify({ code: "session_persist" });
     }
   };
 
@@ -453,6 +468,7 @@ export function Chat() {
       );
     } catch (error) {
       console.error("Unable to load chat session", error);
+      notify({ code: "session_load" });
     }
   };
 
@@ -490,6 +506,7 @@ export function Chat() {
       setSessionToDelete(null);
     } catch (error) {
       console.error("Unable to delete chat session", error);
+      notify({ code: "session_delete" });
     } finally {
       setIsDeletingSession(false);
     }
@@ -541,12 +558,9 @@ export function Chat() {
       return summary;
     } catch (error) {
       console.error("Unable to upload documents", error);
-      const message =
+      const detail =
         error instanceof Error ? error.message : t.uploadFailed;
-      setMessages((current) => [
-        ...current,
-        createMessage("assistant", `${t.uploadErrorPrefix} ${message}`),
-      ]);
+      notify({ message: detail });
       return null;
     } finally {
       setIsUploading(false);
@@ -659,10 +673,7 @@ export function Chat() {
         );
       } catch (error) {
         console.error("Unable to encode image attachments", error);
-        setMessages((current) => [
-          ...current,
-          createMessage("assistant", t.imageReadError),
-        ]);
+        notify({ code: "file_read_error" });
         setStatus(null);
         return;
       }
@@ -717,9 +728,11 @@ export function Chat() {
         openWhenHidden: true,
         async onopen(response) {
           if (!response.ok) {
-            throw new Error(
+            const err = new Error(
               `Chat request failed with status ${response.status}`,
-            );
+            ) as Error & { status?: number };
+            err.status = response.status;
+            throw err;
           }
         },
         onmessage(eventMessage) {
@@ -734,6 +747,14 @@ export function Chat() {
             return;
           }
 
+          if (streamEvent.type === "notice") {
+            notify({
+              code: streamEvent.code,
+              message: streamEvent.content,
+            });
+            return;
+          }
+
           if (streamEvent.type === "token") {
             setStatus(null);
             assistantContent += streamEvent.content;
@@ -743,9 +764,12 @@ export function Chat() {
 
           if (streamEvent.type === "error") {
             setStatus(null);
-            const errorText = `${t.errorPrefix}${streamEvent.content}`;
-            assistantContent += errorText;
-            appendAssistantToken(assistantMessage.id, errorText);
+            const errorMessage = notify({
+              code: streamEvent.code,
+              message: streamEvent.content,
+            });
+            assistantContent += errorMessage;
+            appendAssistantToken(assistantMessage.id, errorMessage);
           }
         },
         onerror(error) {
@@ -766,7 +790,16 @@ export function Chat() {
       if (!controller.signal.aborted) {
         console.error("Unable to stream chat response", error);
         setStatus(null);
-        appendAssistantToken(assistantMessage.id, t.connectionError);
+        const status =
+          error instanceof Error && "status" in error
+            ? Number((error as Error & { status?: number }).status)
+            : undefined;
+        const errorMessage = notify({
+          code: "chat_connection",
+          status: Number.isFinite(status) ? status : undefined,
+          message: error instanceof Error ? error.message : undefined,
+        });
+        appendAssistantToken(assistantMessage.id, errorMessage);
       }
     } finally {
       if (!controller.signal.aborted) {
@@ -837,7 +870,7 @@ export function Chat() {
       <main className="relative flex min-w-0 flex-1 flex-col bg-kennek-charcoal">
         <div className="pointer-events-none absolute inset-0 kennek-grid opacity-40" />
 
-        <header className="relative z-10 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-kennek-steel/70 bg-[#0B0F17]/95 px-3 backdrop-blur sm:px-5 md:h-16 [.light_&]:bg-kennek-charcoal/95">
+        <header className="relative z-10 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-kennek-steel/70 bg-kennek-panel/95 px-3 backdrop-blur sm:px-5 md:h-16">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <button
               type="button"
@@ -948,7 +981,7 @@ export function Chat() {
                     <div
                       className={`relative max-w-[92%] text-sm sm:max-w-[85%] md:max-w-[75%] ${
                         message.role === "user"
-                          ? "clip-chamfer bg-kennek-orange px-3 py-2.5 text-kennek-black sm:px-4 sm:py-3"
+                          ? "clip-chamfer bg-kennek-orange px-3 py-2.5 text-kennek-on-accent sm:px-4 sm:py-3"
                           : "kennek-frame"
                       }`}
                     >
@@ -958,13 +991,13 @@ export function Chat() {
                           message.promptMode !== "auto")) ? (
                         <div className="mb-2 flex flex-wrap gap-1.5">
                           {message.command ? (
-                            <span className="inline-flex items-center clip-chamfer-sm bg-kennek-black/90 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#FF5500] ring-1 ring-[#FF5500]/50">
+                            <span className="inline-flex items-center clip-chamfer-sm bg-kennek-on-accent/85 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#FF5500] ring-1 ring-[#FF5500]/50">
                               MODE: @{message.command}
                             </span>
                           ) : null}
                           {message.promptMode &&
                           message.promptMode !== "auto" ? (
-                            <span className="inline-flex items-center clip-chamfer-sm bg-kennek-black/90 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#FF5500] ring-1 ring-[#FF5500]/50">
+                            <span className="inline-flex items-center clip-chamfer-sm bg-kennek-on-accent/85 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#FF5500] ring-1 ring-[#FF5500]/50">
                               {message.promptMode}
                             </span>
                           ) : null}
@@ -1091,7 +1124,7 @@ export function Chat() {
                   onClick={() => void deleteSession(sessionToDelete.id)}
                   className="kennek-frame"
                 >
-                  <span className="kennek-frame-inner flex items-center gap-2 bg-kennek-orange px-4 py-2.5 text-sm font-bold text-kennek-black transition hover:brightness-110 disabled:opacity-60">
+                  <span className="kennek-frame-inner flex items-center gap-2 bg-kennek-orange px-4 py-2.5 text-sm font-bold text-kennek-on-accent transition hover:brightness-110 disabled:opacity-60">
                     {isDeletingSession ? (
                       <LoaderCircle className="h-4 w-4 animate-spin" />
                     ) : (

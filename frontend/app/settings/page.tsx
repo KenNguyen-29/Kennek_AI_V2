@@ -3,7 +3,6 @@
 import {
   ArrowLeft,
   Bot,
-  CheckCircle2,
   Clock3,
   Globe2,
   LoaderCircle,
@@ -33,6 +32,7 @@ import {
   type KennekSettings,
 } from "../lib/settings-storage";
 import { ThemeToggle } from "../theme/theme-toggle";
+import { useToast } from "../components/ToastProvider";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
@@ -58,11 +58,6 @@ const TABS: Array<{
     icon: Globe2,
   },
 ];
-
-type ToastState = {
-  type: "ok" | "error" | "info";
-  message: string;
-} | null;
 
 function SettingsCard({
   title,
@@ -97,7 +92,7 @@ export default function SettingsPage() {
   const [tab, setTab] = useState<SettingsTab>("models");
   const [settings, setSettings] = useState<KennekSettings>(DEFAULT_SETTINGS);
   const [hydrated, setHydrated] = useState(false);
-  const [toast, setToast] = useState<ToastState>(null);
+  const { showToast } = useToast();
   const [clearing, setClearing] = useState(false);
   const [retentionSyncing, setRetentionSyncing] = useState(false);
 
@@ -229,16 +224,11 @@ export default function SettingsPage() {
     };
   }, [settings.system.language]);
 
-  const showToast = useCallback((next: ToastState) => {
-    setToast(next);
-    window.setTimeout(() => setToast(null), 3200);
-  }, []);
-
   const persist = useCallback(
     (next: KennekSettings, message: string) => {
       setSettings(next);
       saveSettings(next);
-      showToast({ type: "ok", message });
+      showToast({ type: "success", message });
     },
     [showToast],
   );
@@ -317,7 +307,7 @@ export default function SettingsPage() {
         ),
       );
       showToast({
-        type: "ok",
+        type: "success",
         message: copy.historyCleared(sessions.length),
       });
     } catch (error) {
@@ -337,21 +327,19 @@ export default function SettingsPage() {
       return;
     }
     clearLocalCaches();
-    showToast({ type: "ok", message: copy.cacheCleared });
+    showToast({ type: "success", message: copy.cacheCleared });
   };
 
   if (!hydrated) {
     return (
-      <div className="flex h-dvh items-center justify-center bg-[#0B0F17] text-kennek-mist">
+      <div className="flex h-dvh items-center justify-center bg-kennek-charcoal text-kennek-mist">
         <LoaderCircle className="h-5 w-5 animate-spin text-kennek-orange" />
       </div>
     );
   }
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-[#0B0F17] text-foreground lg:flex-row [.light_&]:bg-kennek-charcoal">
-      <div className="pointer-events-none absolute inset-0 kennek-grid opacity-30" />
-
+    <div className="flex h-dvh flex-col overflow-hidden bg-kennek-charcoal text-foreground lg:flex-row">
       {/* Mobile / tablet horizontal tabs */}
       <div className="relative z-10 border-b border-kennek-steel/70 bg-kennek-black lg:hidden">
         <div className="flex h-14 items-center justify-between gap-2 px-3">
@@ -409,11 +397,15 @@ export default function SettingsPage() {
         </nav>
       </div>
 
-      {/* Desktop sidebar */}
-      <aside className="relative z-10 hidden w-64 shrink-0 flex-col border-r border-kennek-steel/70 bg-kennek-black lg:flex">
+      {/* Desktop sidebar — match Chat workspace rail */}
+      <aside className="relative z-10 hidden w-64 shrink-0 flex-col bg-kennek-black lg:flex xl:w-72">
         <div className="kennek-rail absolute inset-y-0 right-0 w-[3px]" aria-hidden />
+        <div
+          className="pointer-events-none absolute inset-y-0 right-[5px] w-px bg-kennek-orange/35"
+          aria-hidden
+        />
 
-        <div className="flex h-16 items-center gap-3 border-b border-kennek-steel/80 px-4">
+        <div className="flex h-14 items-center gap-3 border-b border-kennek-steel/80 px-4 lg:h-16 lg:px-5">
           <div className="clip-chamfer-sm relative h-9 w-9 overflow-hidden bg-kennek-black">
             <Image
               src="/logo_Kennek.png"
@@ -468,8 +460,9 @@ export default function SettingsPage() {
         </div>
       </aside>
 
-      <main className="relative z-10 flex min-w-0 flex-1 flex-col">
-        <header className="hidden h-16 shrink-0 items-center justify-between gap-3 border-b border-kennek-steel/70 bg-[#0B0F17]/90 px-5 backdrop-blur lg:flex [.light_&]:bg-kennek-charcoal/90">
+      <main className="relative z-10 flex min-w-0 flex-1 flex-col bg-kennek-charcoal">
+        <div className="pointer-events-none absolute inset-0 kennek-grid opacity-30" />
+        <header className="relative z-10 hidden h-14 shrink-0 items-center justify-between gap-3 border-b border-kennek-steel/70 bg-kennek-panel/90 px-5 backdrop-blur lg:flex lg:h-16">
           <div className="flex min-w-0 items-center gap-3">
             <div className="clip-chamfer-sm flex h-9 w-9 items-center justify-center bg-kennek-panel ring-1 ring-kennek-orange/40">
               <Settings2 className="h-4 w-4 text-kennek-orange" strokeWidth={2.5} />
@@ -486,14 +479,14 @@ export default function SettingsPage() {
           <div className="flex items-center gap-2">
             <ThemeToggle />
             <Link href="/" className="kennek-frame">
-              <span className="kennek-frame-inner bg-kennek-orange px-3 py-2 text-xs font-bold text-kennek-black">
+              <span className="kennek-frame-inner bg-kennek-orange px-3 py-2 text-xs font-bold text-kennek-on-accent">
                 {copy.back}
               </span>
             </Link>
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-6">
+        <div className="relative z-10 min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-6">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
             {tab === "models" && (
               <SettingsCard
@@ -580,7 +573,7 @@ export default function SettingsPage() {
                     onClick={() => persist(settings, copy.savedModels)}
                     className="kennek-frame"
                   >
-                    <span className="kennek-frame-inner flex items-center gap-2 bg-[#FF5500] px-4 py-2.5 text-sm font-bold text-kennek-black">
+                    <span className="kennek-frame-inner flex items-center gap-2 bg-[#FF5500] px-4 py-2.5 text-sm font-bold text-kennek-on-accent">
                       <Bot className="h-4 w-4" strokeWidth={2.5} />
                       {copy.saveModels}
                     </span>
@@ -770,7 +763,7 @@ export default function SettingsPage() {
                     onClick={() => persist(settings, copy.savedSystem)}
                     className="kennek-frame"
                   >
-                    <span className="kennek-frame-inner flex items-center gap-2 bg-[#FF5500] px-4 py-2.5 text-sm font-bold text-kennek-black">
+                    <span className="kennek-frame-inner flex items-center gap-2 bg-[#FF5500] px-4 py-2.5 text-sm font-bold text-kennek-on-accent">
                       <Save className="h-4 w-4" strokeWidth={2.5} />
                       {copy.saveSystem}
                     </span>
@@ -780,26 +773,6 @@ export default function SettingsPage() {
             )}
           </div>
         </div>
-
-        {toast && (
-          <div className="pointer-events-none absolute bottom-6 left-1/2 z-20 w-[min(92vw,28rem)] -translate-x-1/2">
-            <div className="kennek-frame kennek-frame-active">
-              <div className="kennek-frame-inner flex items-start gap-2 bg-kennek-panel px-4 py-3 text-sm text-kennek-ink">
-                <CheckCircle2
-                  className={`mt-0.5 h-4 w-4 shrink-0 ${
-                    toast.type === "error"
-                      ? "text-red-400"
-                      : toast.type === "info"
-                        ? "text-kennek-mist"
-                        : "text-kennek-orange"
-                  }`}
-                  strokeWidth={2.4}
-                />
-                <p className="leading-5">{toast.message}</p>
-              </div>
-            </div>
-          </div>
-        )}
       </main>
     </div>
   );

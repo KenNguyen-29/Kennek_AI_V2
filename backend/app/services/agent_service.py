@@ -75,12 +75,16 @@ def _build_chat_model(model_id: str, *, temperature: float = 0.2) -> ChatGroq:
         )
 
 
-def _run_tavily_search(query: str, *, max_results: int = TAVILY_MAX_RESULTS) -> str:
-    """Always-on web search; returns a readable block for the LLM."""
+def _run_tavily_search(
+    query: str,
+    *,
+    max_results: int = TAVILY_MAX_RESULTS,
+) -> tuple[str, str | None]:
+    """Always-on web search; returns (block, optional notice code)."""
     settings = get_settings()
     if not settings.tavily_api_key:
         logger.warning("TAVILY_API_KEY missing; skipping auto web search")
-        return ""
+        return "", "tavily_missing_key"
 
     search = TavilySearchResults(
         max_results=max_results,
@@ -92,7 +96,7 @@ def _run_tavily_search(query: str, *, max_results: int = TAVILY_MAX_RESULTS) -> 
         raw = search.invoke({"query": query})
     except Exception:
         logger.exception("Auto Tavily search failed")
-        return ""
+        return "", "tavily_error"
 
     items: list[Any]
     if isinstance(raw, list):
@@ -102,7 +106,7 @@ def _run_tavily_search(query: str, *, max_results: int = TAVILY_MAX_RESULTS) -> 
             parsed = json.loads(raw)
             items = parsed if isinstance(parsed, list) else [{"content": raw}]
         except json.JSONDecodeError:
-            return raw.strip()
+            return raw.strip(), None
     else:
         items = [raw]
 
@@ -125,7 +129,52 @@ def _run_tavily_search(query: str, *, max_results: int = TAVILY_MAX_RESULTS) -> 
         else:
             lines.append(f"[{index}] {item}")
 
-    return "\n\n".join(lines).strip()
+    return "\n\n".join(lines).strip(), None
+
+
+def _stream_error_event(exc: Exception) -> dict[str, str]:
+    name = type(exc).__name__.lower()
+    text = str(exc).lower()
+    combined = f"{name} {text}"
+
+    if "ratelimit" in name or "429" in combined or "rate limit" in combined:
+        return {
+            "type": "error",
+            "code": "groq_rate_limit",
+            "content": "Groq API rate limit reached.",
+        }
+    if (
+        "authentication" in name
+        or "401" in combined
+        or "invalid api key" in combined
+        or "unauthorized" in combined
+    ):
+        return {
+            "type": "error",
+            "code": "groq_auth",
+            "content": "Groq API key is invalid or expired.",
+        }
+    if (
+        "notfound" in name
+        or "model_not_found" in combined
+        or "does not exist" in combined
+    ):
+        return {
+            "type": "error",
+            "code": "model_unavailable",
+            "content": "AI model is unavailable.",
+        }
+    if "tavily" in combined:
+        return {
+            "type": "error",
+            "code": "tavily_error",
+            "content": "Tavily search failed.",
+        }
+    return {
+        "type": "error",
+        "code": "agent_error",
+        "content": "Unable to generate a response.",
+    }
 
 
 def _extract_plain_text(chunk: Any) -> str:
@@ -167,7 +216,11 @@ async def _stream_research_answer(
     yield _format_sse(
         {"type": "status", "content": "Searching web via Tavily..."},
     )
-    web_block = await asyncio.to_thread(_run_tavily_search, query)
+    web_block, tavily_issue = await asyncio.to_thread(_run_tavily_search, query)
+    if tavily_issue:
+        yield _format_sse(
+            {"type": "notice", "code": tavily_issue, "content": tavily_issue},
+        )
 
     kb_contexts = await asyncio.to_thread(query_vector_store, query)
     if kb_contexts:
@@ -310,6 +363,7 @@ async def stream_agent_response(
                 yield _format_sse(
                     {
                         "type": "error",
+                        "code": "moderation_blocked",
                         "content": "Request blocked by content moderation.",
                     },
                 )
@@ -421,8 +475,6 @@ async def stream_agent_response(
             system_prompt=system_prompt,
         ):
             yield chunk
-    except Exception:
+    except Exception as exc:
         logger.exception("Agent streaming failed")
-        yield _format_sse(
-            {"type": "error", "content": "Unable to generate a response."},
-        )
+        yield _format_sse(_stream_error_event(exc))

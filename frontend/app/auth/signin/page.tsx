@@ -79,7 +79,7 @@ export default function SignInPage() {
               onClick={() => signIn("google", { callbackUrl: "/" })}
               className="kennek-frame w-full"
             >
-              <span className="kennek-frame-inner flex w-full items-center justify-center gap-3 bg-white px-4 py-3.5 text-sm font-semibold text-kennek-black transition hover:brightness-95">
+              <span className="kennek-frame-inner flex w-full items-center justify-center gap-3 bg-white px-4 py-3.5 text-sm font-semibold text-kennek-on-light-surface transition hover:brightness-95">
                 <GoogleIcon />
                 Đăng nhập bằng Google
               </span>

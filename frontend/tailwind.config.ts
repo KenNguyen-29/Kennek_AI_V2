@@ -23,6 +23,8 @@ const config: Config = {
           ash: "var(--kennek-ash)",
           ink: "var(--kennek-ink)",
           overlay: "var(--kennek-overlay)",
+          "on-accent": "var(--kennek-on-accent)",
+          "on-light-surface": "var(--kennek-on-light-surface)",
         },
       },
       fontFamily: {

@@ -136,7 +136,7 @@ function SidebarBody({
               href="/auth/signin"
               title={labels.login}
               onClick={() => onNavigate?.()}
-              className="mx-auto flex h-11 w-11 items-center justify-center clip-chamfer-sm bg-kennek-orange text-kennek-black"
+              className="mx-auto flex h-11 w-11 items-center justify-center clip-chamfer-sm bg-kennek-orange text-kennek-on-accent"
             >
               <LogIn className="h-4 w-4" strokeWidth={2.5} />
             </Link>
@@ -148,7 +148,7 @@ function SidebarBody({
                 onClick={() => onNavigate?.()}
                 className="kennek-frame block w-full"
               >
-                <span className="kennek-frame-inner flex w-full items-center justify-center gap-2 bg-kennek-orange px-4 py-2.5 text-sm font-bold text-kennek-black transition hover:brightness-110">
+                <span className="kennek-frame-inner flex w-full items-center justify-center gap-2 bg-kennek-orange px-4 py-2.5 text-sm font-bold text-kennek-on-accent transition hover:brightness-110">
                   <LogIn className="h-4 w-4" strokeWidth={2.5} />
                   {labels.login}
                 </span>
@@ -227,7 +227,7 @@ function SidebarBody({
             })}
           </div>
         ) : !collapsed ? (
-          <p className="px-3 py-4 font-mono text-xs text-kennek-ash">
+          <p className="px-3 py-4 text-sm text-kennek-mist">
             {labels.noSessions}
           </p>
         ) : null}

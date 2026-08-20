@@ -467,7 +467,7 @@ export function ChatInput({
           <div className="kennek-frame-inner bg-kennek-panel p-2">
             {activeDef && ActiveIcon ? (
               <div className="mb-2 flex flex-wrap items-center gap-2 px-1">
-                <span className="inline-flex items-center gap-1.5 clip-chamfer-sm bg-[#FF5500] px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-wide text-kennek-black">
+                <span className="inline-flex items-center gap-1.5 clip-chamfer-sm bg-[#FF5500] px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-wide text-kennek-on-accent">
                   <ActiveIcon className="h-3.5 w-3.5" strokeWidth={2.5} />
                   @{activeDef.id}
                   <button
@@ -523,7 +523,7 @@ export function ChatInput({
                 type="submit"
                 disabled={!canSubmit || disabled}
                 aria-label={sendLabel}
-                className="clip-chamfer-sm flex h-9 w-9 shrink-0 items-center justify-center bg-kennek-orange text-kennek-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-kennek-steel disabled:text-kennek-ash sm:h-11 sm:w-11"
+                className="clip-chamfer-sm flex h-9 w-9 shrink-0 items-center justify-center bg-kennek-orange text-kennek-on-accent transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-kennek-steel disabled:text-kennek-ash sm:h-11 sm:w-11"
               >
                 {isBusy ? (
                   <LoaderCircle
